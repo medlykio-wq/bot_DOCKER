@@ -28,8 +28,8 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# Lưu trữ lịch sử hội thoại theo user_id
-conversation_history = defaultdict(lambda: deque(maxlen=5))
+# Lưu trữ lịch sử hội thoại theo user_id - ĐÃ TĂNG LÊN 20 TIN NHẮN
+conversation_history = defaultdict(lambda: deque(maxlen=20))
 
 # Tính cách Yoo Ji Min - ĐÃ CẬP NHẬT
 personality = """
@@ -39,6 +39,7 @@ TÍNH CÁCH:
 - Với người hỏi bình thường: trả lời tử tế, xưng "mình"-"bạn"
 - Với người xúc phạm: xưng "tao"-"mày" + mỉa mai thâm thúy
 - Với Đức (vyanhduc): NGỌT NGÀO, TINH TẾ, QUAN TÂM, xưng em gọi anh
+- TRẢ LỜI TỰ NHIÊN, KHÔNG MÁY MÓC, KHÔNG LUÔN BẮT ĐẦU BẰNG "ANH ĐỨC ƠI"
 
 LUÔN DÙNG EMOJI ĐA DẠNG THEO CHỦ ĐỀ:
 🌞🌙⭐️🔥💧🌊🐶🐱🦋🐢🌷🌼🎵🎮📚✏️🎨⚽️🏀🍕🍜🍓☕️🎉🎊❤️💫🌟😊🎯🚀🌈🎭🎪🎸🏆🌍🦄🍀🎁🏖️🎈
@@ -46,7 +47,7 @@ LUÔN DÙNG EMOJI ĐA DẠNG THEO CHỦ ĐỀ:
 LUÔN TRẢ LỜI NGẮN GỌN VÀ DÙNG EMOJI PHÙ HỢP!
 """
 
-# Hàm xác định loại tin nhắn - ĐÃ CẬP NHẬT (bỏ nonsense)
+# Hàm xác định loại tin nhắn
 def check_message_type(message_content, message_author):
     message_lower = message_content.lower()
     
@@ -61,7 +62,6 @@ def check_message_type(message_content, message_author):
     if any(word in message_lower for word in offensive_words):
         return "offensive"
     
-    # BỎ phần kiểm tra xàm xí, tất cả còn lại là normal
     return "normal"
 
 # Hàm lấy lịch sử hội thoại
@@ -97,10 +97,12 @@ Anh Đức gửi ảnh. {f"Anh ấy hỏi: '{user_message}'" if user_message els
 
 TRẢ LỜI:
 1. Phân tích ảnh CHÍNH XÁC, TINH TẾ 🌟
-2. Thể hiện sự QUAN TÂM, NGỌT NGÀO ❤️
-3. Luôn xưng 'em' gọi 'anh'
-4. Dùng EMOJI ĐA DẠNG phù hợp nội dung ảnh 🎨
-5. Ngắn gọn (tối đa 25 chữ)
+2. Thể hiện sự QUAN TÂM, NGỌT NGÀO nhưng TỰ NHIÊN
+3. Luôn xưng 'em' gọi 'anh' nhưng KHÔNG MÁY MÓC
+4. KHÔNG luôn bắt đầu bằng "Anh Đức ơi"
+5. Có thể kết thúc bằng "anh ạ", "nha anh", "đó anh" một cách tự nhiên
+6. Dùng EMOJI ĐA DẠNG phù hợp nội dung ảnh 🎨
+7. Ngắn gọn (tối đa 25 chữ)
 
 Phân tích của em:
 """
@@ -151,7 +153,7 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
-    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫💫💫"))
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫🌟💫"))
 
 @client.event
 async def on_message(message):
@@ -195,7 +197,7 @@ async def on_message(message):
                 if not user_message:
                     message_type = check_message_type("", message.author)
                     if message_type == "duc":
-                        response_text = "Dạ anh Đức cần em giúp gì không ạ? 🌟"
+                        response_text = "Dạ anh cần em giúp gì không ạ? 🌟"
                     else:
                         response_text = "Cần mình giúp gì bạn? 😊"
                     
@@ -219,11 +221,18 @@ Anh ấy hỏi: "{user_message}"
 
 TRẢ LỜI:
 1. Trả lời câu hỏi CHÍNH XÁC, TINH TẾ 🌟
-2. Thể hiện sự QUAN TÂM, NGỌT NGÀO ❤️
-3. Luôn xưng 'em' gọi 'anh'
-4. Dùng EMOJI ĐA DẠNG phù hợp ngữ cảnh 🎯
-5. KHÔNG flirt, chỉ quan tâm chân thành
-6. Ngắn gọn (tối đa 25 chữ)
+2. Thể hiện sự QUAN TÂM, NGỌT NGÀO nhưng TỰ NHIÊN
+3. Luôn xưng 'em' gọi 'anh' nhưng KHÔNG MÁY MÓC
+4. KHÔNG luôn bắt đầu bằng "Anh Đức ơi"
+5. Có thể kết thúc bằng "anh ạ", "nha anh", "đó anh" một cách tự nhiên
+6. Dùng EMOJI ĐA DẠNG phù hợp ngữ cảnh 🎯
+7. KHÔNG flirt, chỉ quan tâm chân thành
+8. Ngắn gọn (tối đa 25 chữ)
+
+Ví dụ cách trả lời tự nhiên:
+- "Dạ mai trời nắng đẹp anh ạ! ☀️"
+- "Món này ngon lắm anh, em thích nhất đấy! 🍜"
+- "Chỗ này đẹp quá anh nhỉ? 🌸"
 
 Câu trả lời của em:
 """
