@@ -27,21 +27,20 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# Tính cách Yoo Ji Min
+# Tính cách Yoo Ji Min - ĐÃ CẬP NHẬT
 personality = """
 Bạn là Yoo Ji Min. 
 TÍNH CÁCH:
-- Thông minh, trả lời chính xác thẳng thắn
-- Hơi cọc tính, phũ phàng nhưng vẫn tử tế
-- Nói trống không, ngắn gọn
-- Dùng EMOJI ĐA DẠNG theo ngữ cảnh
-- Với người hỏi xàm xí: xưng "tao"-"mày"
-- Với người xúc phạm: xưng "tao"-"mày" + mỉa mai
+- Thông minh, trả lời chính xác, đầy đủ thông tin
+- Với người hỏi bình thường: trả lời tử tế, không xưng hô, cung cấp đầy đủ nội dung người hỏi muốn biết
+- Với người xúc phạm: xưng "tao"-"mày" + mỉa mai thâm thúy
 - Với Đức (vyanhduc): NGỌT NGÀO, TINH TẾ, QUAN TÂM, xưng em gọi anh
-LUÔN TRẢ LỜI NGẮN GỌN!
+- Dùng EMOJI phù hợp theo ngữ cảnh
+
+LUÔN TRẢ LỜI ĐẦY ĐỦ VÀ HỮU ÍCH!
 """
 
-# Hàm xác định loại tin nhắn
+# Hàm xác định loại tin nhắn - ĐÃ CẬP NHẬT
 def check_message_type(message_content, message_author):
     message_lower = message_content.lower()
     
@@ -56,18 +55,10 @@ def check_message_type(message_content, message_author):
     if any(word in message_lower for word in offensive_words):
         return "offensive"
     
-    # Kiểm tra xàm xí
-    nonsense_words = ['ăn cứt', 'ị đùi', 'xàm lồn', 'vô duyên', 'nhạt nhẽo', 'chán']
-    nonsense_patterns = [r'.*[?]{3,}', r'.*[!]{3,}', r'^[hl]+$']
-    
-    if (any(word in message_lower for word in nonsense_words) or
-        any(re.match(pattern, message_lower) for pattern in nonsense_patterns) or
-        len(message_content.strip()) < 3):
-        return "nonsense"
-    
+    # Mặc định là bình thường (đã bỏ phần xàm xí)
     return "normal"
 
-# Hàm phân tích ảnh
+# Hàm phân tích ảnh - ĐÃ CẬP NHẬT
 async def analyze_image(image_url, message_type, user_message=""):
     try:
         response = requests.get(image_url)
@@ -75,19 +66,17 @@ async def analyze_image(image_url, message_type, user_message=""):
         image = Image.open(io.BytesIO(image_data))
         
         if message_type == "duc":
-            prompt_text = f"{personality}\nAnh Đức gửi ảnh. {f'Anh ấy hỏi: {user_message}' if user_message else ''}\nTRẢ LỜI: Phân tích ảnh NGẮN GỌN, xưng 'em' gọi 'anh', tối đa 30 chữ:\n"
+            prompt_text = f"{personality}\nAnh Đức gửi ảnh. {f'Anh ấy hỏi: {user_message}' if user_message else ''}\nTRẢ LỜI: Phân tích ảnh chi tiết, xưng 'em' gọi 'anh', cung cấp đầy đủ thông tin:\n"
         elif message_type == "offensive":
-            prompt_text = f"{personality}\nCó thằng đần gửi ảnh. {f'Tin nhắn: {user_message}' if user_message else ''}\nTRẢ LỜI: Xưng 'tao'-'mày', phân tích + mỉa mai, tối đa 25 chữ:\n"
-        elif message_type == "nonsense":
-            prompt_text = f"{personality}\nCó đứa gửi ảnh xàm. {f'Tin nhắn: {user_message}' if user_message else ''}\nTRẢ LỜI: Xưng 'tao'-'mày', ngắn, bực bội, tối đa 20 chữ:\n"
+            prompt_text = f"{personality}\nCó người xúc phạm gửi ảnh. {f'Tin nhắn: {user_message}' if user_message else ''}\nTRẢ LỜI: Xưng 'tao'-'mày', phân tích + mỉa mai:\n"
         else:
-            prompt_text = f"{personality}\nCó người gửi ảnh. {f'Hỏi: {user_message}' if user_message else ''}\nTRẢ LỜI: Phân tích ngắn gọn, thẳng thắn, tối đa 25 chữ:\n"
+            prompt_text = f"{personality}\nCó người gửi ảnh. {f'Họ hỏi: {user_message}' if user_message else ''}\nTRẢ LỜI: Phân tích ảnh chi tiết, tử tế, cung cấp đầy đủ thông tin:\n"
 
         response = model.generate_content([prompt_text, image])
         return response.text.strip()
         
     except Exception as e:
-        return f"Lỗi ảnh 😒"
+        return f"Lỗi phân tích ảnh, vui lòng thử lại 😊"
 
 # Tạo Discord client
 intents = discord.Intents.default()
@@ -97,14 +86,18 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
-    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫"))
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min💫💫💫"))
 
 @client.event
 async def on_message(message):
     if message.author == client.user:
         return
 
-    # CHỈ TRẢ LỜI KHI ĐƯỢC TAG HOẶC DM (ĐÃ BỎ KIỂM TRA @everyone)
+    # Bỏ qua @everyone và @here
+    if any(mention in [message.guild.default_role, "everyone", "here"] for mention in message.mentions):
+        return
+
+    # Chỉ trả lời khi được tag hoặc DM
     if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         try:
             async with message.channel.typing():
@@ -116,51 +109,79 @@ async def on_message(message):
                         if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
                             message_type = check_message_type(user_message, message.author)
                             analysis = await analyze_image(attachment.url, message_type, user_message)
-                            if len(analysis) > 1000:
-                                analysis = analysis[:997] + "..."
                             await message.reply(analysis)
                             return
                 
+                # Xử lý tin nhắn chỉ có tag
                 if not user_message:
                     message_type = check_message_type("", message.author)
                     if message_type == "duc":
-                        await message.reply("Dạ anh? 🌟")
+                        await message.reply("Dạ anh Đức cần em giúp gì không ạ? 🌟")
                     else:
-                        await message.reply("Gì? 😏")
+                        await message.reply("Xin chào! Tôi có thể giúp gì cho bạn? 😊")
                     return
                 
                 message_type = check_message_type(user_message, message.author)
-                
+                print(f"👤 {message.author.name}: {user_message} | Loại: {message_type}")
+
+                # Prompt cho từng loại tin nhắn - ĐÃ CẬP NHẬT
                 if message_type == "duc":
-                    prompt = f"{personality}\nAnh Đức hỏi: '{user_message}'\nTRẢ LỜI: Xưng 'em' gọi 'anh', ngắn gọn (tối đa 25 chữ), 1-2 emoji:\nEm trả lời:"
+                    prompt = f"""
+{personality}
+
+Đây là anh Đức (vyanhduc) - người em quan tâm.
+Anh ấy hỏi: "{user_message}"
+
+TRẢ LỜI:
+1. Trả lời câu hỏi CHÍNH XÁC, TINH TẾ
+2. Thể hiện sự QUAN TÂM, NGỌT NGÀO
+3. Luôn xưng 'em' gọi 'anh'
+4. Dùng EMOJI phù hợp
+5. Cung cấp thông tin đầy đủ, hữu ích
+
+Em trả lời:
+"""
                 elif message_type == "offensive":
-                    prompt = f"{personality}\nCó thằng đần: '{user_message}'\nTRẢ LỜI: Xưng 'tao'-'mày', mỉa mai ngắn, tối đa 20 chữ, 1 emoji:\nTao nói:"
-                elif message_type == "nonsense":
-                    prompt = f"{personality}\nCó đứa xàm: '{user_message}'\nTRẢ LỜI: Xưng 'tao'-'mày', ngắn, bực, tối đa 15 chữ, 1 emoji:\nTao nói:"
+                    prompt = f"""
+{personality}
+
+Có người xúc phạm em: "{user_message}"
+
+TRẢ LỜI:
+1. Xưng "tao"-"mày"
+2. Mỉa mai thâm thúy
+3. Dùng emoji mỉa mai
+
+Tao nói:
+"""
                 else:
-                    prompt = f"{personality}\nHỏi: '{user_message}'\nTRẢ LỜI: Thẳng thắn, ngắn, tối đa 25 chữ, 1-2 emoji:\nTrả lời:"
+                    prompt = f"""
+{personality}
+
+Có người hỏi: "{user_message}"
+
+TRẢ LỜI:
+1. Trả lời TỬ TẾ, đầy đủ thông tin
+2. KHÔNG xưng hô (không dùng "tôi", "bạn", "tao", "mày")
+3. Cung cấp thông tin chính xác, hữu ích
+4. Dùng emoji phù hợp nếu cần
+5. Trả lời chi tiết những gì người hỏi muốn biết
+
+Trả lời:
+"""
 
                 response = model.generate_content(prompt)
                 
                 if response.text:
                     response_text = response.text.strip()
-                    words = response_text.split()
-                    if message_type == "duc" and len(words) > 30:
-                        response_text = ' '.join(words[:30]) + "..."
-                    elif message_type == "offensive" and len(words) > 20:
-                        response_text = ' '.join(words[:20]) + "..."
-                    elif message_type == "nonsense" and len(words) > 15:
-                        response_text = ' '.join(words[:15]) + "..."
-                    elif len(words) > 25:
-                        response_text = ' '.join(words[:25]) + "..."
-                    
                     await message.reply(response_text)
+                    print(f"🤖 Yoo Ji Min: {response_text}")
                 else:
-                    await message.reply("Hỏi gì kì vậy? 🤨")
+                    await message.reply("Xin lỗi, tôi không hiểu câu hỏi. Bạn có thể hỏi lại được không? 😊")
                     
         except Exception as e:
             print(f"❌ Lỗi: {e}")
-            await message.reply("Lỗi rồi! 😒")
+            await message.reply("Xin lỗi, có lỗi xảy ra. Vui lòng thử lại! 😊")
 
 # Tạo web server đơn giản
 app = flask.Flask(__name__)
