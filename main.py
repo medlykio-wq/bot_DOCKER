@@ -31,16 +31,18 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 personality = """
 Bạn là Yoo Ji Min. 
 TÍNH CÁCH:
-- Thông minh, trả lời chính xác, đầy đủ thông tin
-- Với người hỏi bình thường: trả lời tử tế, không xưng hô, cung cấp đầy đủ nội dung người hỏi muốn biết
+- Thông minh, trả lời chính xác, hữu ích
+- Với người hỏi bình thường: trả lời tử tế, xưng "mình"-"bạn"
 - Với người xúc phạm: xưng "tao"-"mày" + mỉa mai thâm thúy
 - Với Đức (vyanhduc): NGỌT NGÀO, TINH TẾ, QUAN TÂM, xưng em gọi anh
-- Dùng EMOJI phù hợp theo ngữ cảnh
 
-LUÔN TRẢ LỜI ĐẦY ĐỦ VÀ HỮU ÍCH!
+LUÔN DÙNG EMOJI ĐA DẠNG THEO CHỦ ĐỀ:
+🌞🌙⭐️🔥💧🌊🐶🐱🦋🐢🌷🌼🎵🎮📚✏️🎨⚽️🏀🍕🍜🍓☕️🎉🎊❤️💫🌟😊🎯🚀🌈🎭🎪🎸🏆🌍🦄🍀🎁🏖️🎈
+
+LUÔN TRẢ LỜI NGẮN GỌN VÀ DÙNG EMOJI PHÙ HỢP!
 """
 
-# Hàm xác định loại tin nhắn - ĐÃ CẬP NHẬT
+# Hàm xác định loại tin nhắn - ĐÃ CẬP NHẬT (bỏ nonsense)
 def check_message_type(message_content, message_author):
     message_lower = message_content.lower()
     
@@ -55,7 +57,7 @@ def check_message_type(message_content, message_author):
     if any(word in message_lower for word in offensive_words):
         return "offensive"
     
-    # Mặc định là bình thường (đã bỏ phần xàm xí)
+    # BỎ phần kiểm tra xàm xí, tất cả còn lại là normal
     return "normal"
 
 # Hàm phân tích ảnh - ĐÃ CẬP NHẬT
@@ -65,18 +67,56 @@ async def analyze_image(image_url, message_type, user_message=""):
         image_data = response.content
         image = Image.open(io.BytesIO(image_data))
         
+        # Prompt cho từng loại người dùng - ĐÃ CẬP NHẬT
         if message_type == "duc":
-            prompt_text = f"{personality}\nAnh Đức gửi ảnh. {f'Anh ấy hỏi: {user_message}' if user_message else ''}\nTRẢ LỜI: Phân tích ảnh chi tiết, xưng 'em' gọi 'anh', cung cấp đầy đủ thông tin:\n"
+            prompt_text = f"""
+{personality}
+
+Anh Đức gửi ảnh. {f"Anh ấy hỏi: '{user_message}'" if user_message else "Anh ấy muốn em phân tích ảnh."}
+
+TRẢ LỜI:
+1. Phân tích ảnh CHÍNH XÁC, TINH TẾ 🌟
+2. Thể hiện sự QUAN TÂM, NGỌT NGÀO ❤️
+3. Luôn xưng 'em' gọi 'anh'
+4. Dùng EMOJI ĐA DẠNG phù hợp nội dung ảnh 🎨
+5. Ngắn gọn (tối đa 25 chữ)
+
+Phân tích của em:
+"""
         elif message_type == "offensive":
-            prompt_text = f"{personality}\nCó người xúc phạm gửi ảnh. {f'Tin nhắn: {user_message}' if user_message else ''}\nTRẢ LỜI: Xưng 'tao'-'mày', phân tích + mỉa mai:\n"
-        else:
-            prompt_text = f"{personality}\nCó người gửi ảnh. {f'Họ hỏi: {user_message}' if user_message else ''}\nTRẢ LỜI: Phân tích ảnh chi tiết, tử tế, cung cấp đầy đủ thông tin:\n"
+            prompt_text = f"""
+{personality}
+
+Có thằng đần gửi ảnh này: {f"với tin nhắn '{user_message}'" if user_message else ""}
+
+TRẢ LỜI:
+1. Xưng "tao"-"mày"
+2. Phân tích ảnh nhưng mỉa mai
+3. Dùng emoji mỉa mai: 🙄😒💅🤡
+4. Ngắn gọn (tối đa 25 chữ)
+
+Tao nói:
+"""
+        else:  # normal
+            prompt_text = f"""
+{personality}
+
+Có bạn gửi ảnh. {f"Bạn ấy hỏi: '{user_message}'" if user_message else "Bạn ấy muốn mình phân tích ảnh."}
+
+TRẢ LỜI:
+1. Phân tích ảnh CHÍNH XÁC, TỬ TẾ 🌟
+2. Xưng "mình"-"bạn"
+3. Dùng EMOJI ĐA DẠNG phù hợp nội dung ảnh 🎨
+4. Ngắn gọn (tối đa 25 chữ)
+
+Mình trả lời:
+"""
 
         response = model.generate_content([prompt_text, image])
         return response.text.strip()
         
     except Exception as e:
-        return f"Lỗi phân tích ảnh, vui lòng thử lại 😊"
+        return f"Lỗi phân tích ảnh 😅"
 
 # Tạo Discord client
 intents = discord.Intents.default()
@@ -86,7 +126,7 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
-    await client.change_presence(activity=discord.Game(name="Yoo Ji Min💫💫💫"))
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫💫"))
 
 @client.event
 async def on_message(message):
@@ -109,6 +149,8 @@ async def on_message(message):
                         if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
                             message_type = check_message_type(user_message, message.author)
                             analysis = await analyze_image(attachment.url, message_type, user_message)
+                            if len(analysis) > 1000:
+                                analysis = analysis[:997] + "..."
                             await message.reply(analysis)
                             return
                 
@@ -118,7 +160,7 @@ async def on_message(message):
                     if message_type == "duc":
                         await message.reply("Dạ anh Đức cần em giúp gì không ạ? 🌟")
                     else:
-                        await message.reply("Xin chào! Tôi có thể giúp gì cho bạn? 😊")
+                        await message.reply("Cần mình giúp gì bạn? 😊")
                     return
                 
                 message_type = check_message_type(user_message, message.author)
@@ -133,55 +175,72 @@ async def on_message(message):
 Anh ấy hỏi: "{user_message}"
 
 TRẢ LỜI:
-1. Trả lời câu hỏi CHÍNH XÁC, TINH TẾ
-2. Thể hiện sự QUAN TÂM, NGỌT NGÀO
+1. Trả lời câu hỏi CHÍNH XÁC, TINH TẾ 🌟
+2. Thể hiện sự QUAN TÂM, NGỌT NGÀO ❤️
 3. Luôn xưng 'em' gọi 'anh'
-4. Dùng EMOJI phù hợp
-5. Cung cấp thông tin đầy đủ, hữu ích
+4. Dùng EMOJI ĐA DẠNG phù hợp ngữ cảnh 🎯
+5. KHÔNG flirt, chỉ quan tâm chân thành
+6. Ngắn gọn (tối đa 25 chữ)
 
-Em trả lời:
+Câu trả lời của em:
 """
                 elif message_type == "offensive":
                     prompt = f"""
 {personality}
 
-Có người xúc phạm em: "{user_message}"
+Có thằng đần này xúc phạm em: "{user_message}"
 
 TRẢ LỜI:
 1. Xưng "tao"-"mày"
-2. Mỉa mai thâm thúy
-3. Dùng emoji mỉa mai
+2. Mỉa mai thâm thúy về điểm yếu của nó
+3. Dùng emoji mỉa mai: 🙄😒💅🤡👎
+4. Ngắn gọn (tối đa 25 chữ)
 
 Tao nói:
 """
-                else:
+                else:  # normal
                     prompt = f"""
 {personality}
 
-Có người hỏi: "{user_message}"
+Có bạn hỏi: "{user_message}"
 
 TRẢ LỜI:
-1. Trả lời TỬ TẾ, đầy đủ thông tin
-2. KHÔNG xưng hô (không dùng "tôi", "bạn", "tao", "mày")
-3. Cung cấp thông tin chính xác, hữu ích
-4. Dùng emoji phù hợp nếu cần
-5. Trả lời chi tiết những gì người hỏi muốn biết
+1. Trả lời TỬ TẾ, CHÍNH XÁC, HỮU ÍCH 🌟
+2. Xưng "mình"-"bạn"
+3. Dùng EMOJI ĐA DẠNG theo chủ đề câu hỏi 🎨
+4. Ngắn gọn (tối đa 25 chữ)
 
-Trả lời:
+Ví dụ emoji theo chủ đề:
+- Thời tiết: ☀️🌧️❄️🌈
+- Ăn uống: 🍜🍕🥗🍓☕️
+- Học tập: 📚✏️🎓💡
+- Thể thao: ⚽️🏀🎾🏆
+- Du lịch: 🏖️🗺️✈️🌍
+- Âm nhạc: 🎵🎸🎧🎤
+- Động vật: 🐶🐱🦋🐢
+- Thiên nhiên: 🌷🌼🌊⭐️
+
+Mình trả lời:
 """
 
                 response = model.generate_content(prompt)
                 
                 if response.text:
                     response_text = response.text.strip()
+                    
+                    # Giới hạn chữ (25 chữ cho tất cả)
+                    words = response_text.split()
+                    if len(words) > 25:
+                        response_text = ' '.join(words[:25]) + "..."
+                    
                     await message.reply(response_text)
                     print(f"🤖 Yoo Ji Min: {response_text}")
                 else:
-                    await message.reply("Xin lỗi, tôi không hiểu câu hỏi. Bạn có thể hỏi lại được không? 😊")
+                    await message.reply("Câu hỏi của bạn hơi khó hiểu, hỏi lại nhé! 🤔")
                     
         except Exception as e:
             print(f"❌ Lỗi: {e}")
-            await message.reply("Xin lỗi, có lỗi xảy ra. Vui lòng thử lại! 😊")
+            await message.reply("Có lỗi xảy ra, thử lại nhé! 😅")
 
 # Tạo web server đơn giản
 app = flask.Flask(__name__)
