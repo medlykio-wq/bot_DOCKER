@@ -8,6 +8,7 @@ from PIL import Image
 import os
 import flask
 import threading
+from collections import defaultdict, deque
 
 # Lấy token từ environment variables
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -26,6 +27,9 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 # Cấu hình Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
+
+# Lưu trữ lịch sử hội thoại theo user_id
+conversation_history = defaultdict(lambda: deque(maxlen=5))
 
 # Tính cách Yoo Ji Min - ĐÃ CẬP NHẬT
 personality = """
@@ -60,8 +64,23 @@ def check_message_type(message_content, message_author):
     # BỎ phần kiểm tra xàm xí, tất cả còn lại là normal
     return "normal"
 
+# Hàm lấy lịch sử hội thoại
+def get_conversation_history(user_id):
+    history = conversation_history[user_id]
+    if not history:
+        return ""
+    
+    history_text = "Lịch sử trò chuyện gần đây:\n"
+    for i, msg in enumerate(history, 1):
+        history_text += f"{i}. {msg}\n"
+    return history_text + "\n"
+
+# Hàm thêm tin nhắn vào lịch sử
+def add_to_history(user_id, message):
+    conversation_history[user_id].append(message)
+
 # Hàm phân tích ảnh - ĐÃ CẬP NHẬT
-async def analyze_image(image_url, message_type, user_message=""):
+async def analyze_image(image_url, message_type, user_message="", history_text=""):
     try:
         response = requests.get(image_url)
         image_data = response.content
@@ -71,6 +90,8 @@ async def analyze_image(image_url, message_type, user_message=""):
         if message_type == "duc":
             prompt_text = f"""
 {personality}
+
+{history_text}
 
 Anh Đức gửi ảnh. {f"Anh ấy hỏi: '{user_message}'" if user_message else "Anh ấy muốn em phân tích ảnh."}
 
@@ -87,6 +108,8 @@ Phân tích của em:
             prompt_text = f"""
 {personality}
 
+{history_text}
+
 Có thằng đần gửi ảnh này: {f"với tin nhắn '{user_message}'" if user_message else ""}
 
 TRẢ LỜI:
@@ -100,6 +123,8 @@ Tao nói:
         else:  # normal
             prompt_text = f"""
 {personality}
+
+{history_text}
 
 Có bạn gửi ảnh. {f"Bạn ấy hỏi: '{user_message}'" if user_message else "Bạn ấy muốn mình phân tích ảnh."}
 
@@ -126,7 +151,7 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
-    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫💫💫💫💫"))
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫💫💫"))
 
 @client.event
 async def on_message(message):
@@ -141,26 +166,42 @@ async def on_message(message):
     if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         try:
             async with message.channel.typing():
+                user_id = str(message.author.id)
                 user_message = message.content.replace(f'<@{client.user.id}>', '').strip()
+                
+                # Lấy lịch sử hội thoại
+                history_text = get_conversation_history(user_id)
                 
                 # Xử lý ảnh đính kèm
                 if message.attachments:
                     for attachment in message.attachments:
                         if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
                             message_type = check_message_type(user_message, message.author)
-                            analysis = await analyze_image(attachment.url, message_type, user_message)
+                            analysis = await analyze_image(attachment.url, message_type, user_message, history_text)
+                            
+                            # Giới hạn độ dài
                             if len(analysis) > 1000:
                                 analysis = analysis[:997] + "..."
+                            
                             await message.reply(analysis)
+                            
+                            # Lưu vào lịch sử
+                            if user_message:
+                                add_to_history(user_id, f"User: {user_message} (có ảnh đính kèm)")
+                            add_to_history(user_id, f"Bot: {analysis}")
                             return
                 
                 # Xử lý tin nhắn chỉ có tag
                 if not user_message:
                     message_type = check_message_type("", message.author)
                     if message_type == "duc":
-                        await message.reply("Dạ anh Đức cần em giúp gì không ạ? 🌟")
+                        response_text = "Dạ anh Đức cần em giúp gì không ạ? 🌟"
                     else:
-                        await message.reply("Cần mình giúp gì bạn? 😊")
+                        response_text = "Cần mình giúp gì bạn? 😊"
+                    
+                    await message.reply(response_text)
+                    add_to_history(user_id, f"User: (tag không kèm tin nhắn)")
+                    add_to_history(user_id, f"Bot: {response_text}")
                     return
                 
                 message_type = check_message_type(user_message, message.author)
@@ -170,6 +211,8 @@ async def on_message(message):
                 if message_type == "duc":
                     prompt = f"""
 {personality}
+
+{history_text}
 
 Đây là anh Đức (vyanhduc) - người em quan tâm.
 Anh ấy hỏi: "{user_message}"
@@ -188,6 +231,8 @@ Câu trả lời của em:
                     prompt = f"""
 {personality}
 
+{history_text}
+
 Có thằng đần này xúc phạm em: "{user_message}"
 
 TRẢ LỜI:
@@ -201,6 +246,8 @@ Tao nói:
                 else:  # normal
                     prompt = f"""
 {personality}
+
+{history_text}
 
 Có bạn hỏi: "{user_message}"
 
@@ -235,12 +282,20 @@ Mình trả lời:
                     
                     await message.reply(response_text)
                     print(f"🤖 Yoo Ji Min: {response_text}")
+                    
+                    # Lưu vào lịch sử
+                    add_to_history(user_id, f"User: {user_message}")
+                    add_to_history(user_id, f"Bot: {response_text}")
                 else:
-                    await message.reply("Câu hỏi của bạn hơi khó hiểu, hỏi lại nhé! 🤔")
+                    error_msg = "Câu hỏi của bạn hơi khó hiểu, hỏi lại nhé! 🤔"
+                    await message.reply(error_msg)
+                    add_to_history(user_id, f"User: {user_message}")
+                    add_to_history(user_id, f"Bot: {error_msg}")
                     
         except Exception as e:
             print(f"❌ Lỗi: {e}")
-            await message.reply("Có lỗi xảy ra, thử lại nhé! 😅")
+            error_msg = "Có lỗi xảy ra, thử lại nhé! 😅"
+            await message.reply(error_msg)
 
 # Tạo web server đơn giản
 app = flask.Flask(__name__)
