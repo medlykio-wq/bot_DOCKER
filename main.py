@@ -126,7 +126,7 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
-    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫💫"))
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫💫💫💫💫"))
 
 @client.event
 async def on_message(message):
