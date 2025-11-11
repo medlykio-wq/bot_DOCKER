@@ -28,8 +28,8 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# Lưu trữ lịch sử hội thoại theo user_id - ĐÃ TĂNG LÊN 20 TIN NHẮN
-conversation_history = defaultdict(lambda: deque(maxlen=20))
+# Lưu trữ lịch sử hội thoại theo channel_id - KHÔNG GIỚI HẠN SỐ LƯỢNG
+conversation_history = defaultdict(lambda: deque(maxlen=100))  # Tăng lên 100 tin nhắn
 
 # Tính cách Yoo Ji Min - ĐÃ CẬP NHẬT
 personality = """
@@ -64,20 +64,20 @@ def check_message_type(message_content, message_author):
     
     return "normal"
 
-# Hàm lấy lịch sử hội thoại
-def get_conversation_history(user_id):
-    history = conversation_history[user_id]
+# Hàm lấy lịch sử hội thoại theo channel
+def get_conversation_history(channel_id):
+    history = conversation_history[channel_id]
     if not history:
         return ""
     
-    history_text = "Lịch sử trò chuyện gần đây:\n"
-    for i, msg in enumerate(history, 1):
+    history_text = "Lịch sử trò chuyện trong kênh này:\n"
+    for i, msg in enumerate(list(history)[-30:], 1):  # Chỉ hiển thị 30 tin nhắn gần nhất
         history_text += f"{i}. {msg}\n"
     return history_text + "\n"
 
-# Hàm thêm tin nhắn vào lịch sử
-def add_to_history(user_id, message):
-    conversation_history[user_id].append(message)
+# Hàm thêm tin nhắn vào lịch sử theo channel
+def add_to_history(channel_id, message):
+    conversation_history[channel_id].append(message)
 
 # Hàm phân tích ảnh - ĐÃ CẬP NHẬT
 async def analyze_image(image_url, message_type, user_message="", history_text=""):
@@ -153,7 +153,7 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
-    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫🌟💫"))
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫💫💫"))
 
 @client.event
 async def on_message(message):
@@ -168,11 +168,12 @@ async def on_message(message):
     if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         try:
             async with message.channel.typing():
-                user_id = str(message.author.id)
+                # Sử dụng channel_id làm key cho lịch sử hội thoại
+                channel_id = str(message.channel.id)
                 user_message = message.content.replace(f'<@{client.user.id}>', '').strip()
                 
-                # Lấy lịch sử hội thoại
-                history_text = get_conversation_history(user_id)
+                # Lấy lịch sử hội thoại của kênh
+                history_text = get_conversation_history(channel_id)
                 
                 # Xử lý ảnh đính kèm
                 if message.attachments:
@@ -187,10 +188,10 @@ async def on_message(message):
                             
                             await message.reply(analysis)
                             
-                            # Lưu vào lịch sử
+                            # Lưu vào lịch sử kênh
                             if user_message:
-                                add_to_history(user_id, f"User: {user_message} (có ảnh đính kèm)")
-                            add_to_history(user_id, f"Bot: {analysis}")
+                                add_to_history(channel_id, f"{message.author.display_name}: {user_message} (có ảnh đính kèm)")
+                            add_to_history(channel_id, f"Yoo Ji Min: {analysis}")
                             return
                 
                 # Xử lý tin nhắn chỉ có tag
@@ -202,12 +203,12 @@ async def on_message(message):
                         response_text = "Cần mình giúp gì bạn? 😊"
                     
                     await message.reply(response_text)
-                    add_to_history(user_id, f"User: (tag không kèm tin nhắn)")
-                    add_to_history(user_id, f"Bot: {response_text}")
+                    add_to_history(channel_id, f"{message.author.display_name}: (tag không kèm tin nhắn)")
+                    add_to_history(channel_id, f"Yoo Ji Min: {response_text}")
                     return
                 
                 message_type = check_message_type(user_message, message.author)
-                print(f"👤 {message.author.name}: {user_message} | Loại: {message_type}")
+                print(f"👤 {message.author.name} trong kênh {message.channel.name}: {user_message} | Loại: {message_type}")
 
                 # Prompt cho từng loại tin nhắn - ĐÃ CẬP NHẬT
                 if message_type == "duc":
@@ -292,14 +293,14 @@ Mình trả lời:
                     await message.reply(response_text)
                     print(f"🤖 Yoo Ji Min: {response_text}")
                     
-                    # Lưu vào lịch sử
-                    add_to_history(user_id, f"User: {user_message}")
-                    add_to_history(user_id, f"Bot: {response_text}")
+                    # Lưu vào lịch sử kênh
+                    add_to_history(channel_id, f"{message.author.display_name}: {user_message}")
+                    add_to_history(channel_id, f"Yoo Ji Min: {response_text}")
                 else:
                     error_msg = "Câu hỏi của bạn hơi khó hiểu, hỏi lại nhé! 🤔"
                     await message.reply(error_msg)
-                    add_to_history(user_id, f"User: {user_message}")
-                    add_to_history(user_id, f"Bot: {error_msg}")
+                    add_to_history(channel_id, f"{message.author.display_name}: {user_message}")
+                    add_to_history(channel_id, f"Yoo Ji Min: {error_msg}")
                     
         except Exception as e:
             print(f"❌ Lỗi: {e}")
