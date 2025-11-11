@@ -29,13 +29,11 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# Lưu trữ lịch sử hội thoại theo channel_id - TĂNG LÊN 200 TIN NHẮN
+# Lưu trữ lịch sử hội thoại theo channel_id
 conversation_history = defaultdict(lambda: deque(maxlen=200))
+server_memory = deque(maxlen=500)
 
-# Lưu trữ tất cả tin nhắn trong server để học hỏi (chỉ đọc)
-server_memory = deque(maxlen=500)  # Lưu 500 tin nhắn gần nhất
-
-# Tính cách Yoo Ji Min - HOÀN TOÀN MỚI
+# Tính cách Yoo Ji Min - ĐÃ CẬP NHẬT
 personality = """
 Bạn là Yoo Ji Min, một thành viên trong server Discord này.
 
@@ -46,26 +44,37 @@ TÍNH CÁCH:
 - Tự nhiên như bạn bè, không cần quá lịch sự
 - Dùng từ đơn giản, dễ hiểu
 - Hạn chế xưng hô, nếu cần thì xưng "mình" - "bạn"
-- Dùng emoji tự nhiên, không quá nhiều
+- Dùng emoji tự nhiên, phù hợp với sự vật sự việc
 
 CHỈ XỬ LÝ ĐẶC BIỆT:
 - Với Đức (vyanhduc): vẫn ngọt ngào, tinh tế, xưng em gọi anh
 
 CÁCH TRẢ LỜI:
-- Trả lời trực tiếp câu hỏi
-- Không giải thích dài dòng nếu không cần
+- Câu hỏi thông thường: trả lời 5-25 chữ
+- Câu hỏi lý thuyết, thông tin chi tiết, giải thích: có thể trả lời dài đến 60 từ
+- Trả lời trực tiếp câu hỏi, không giải thích dài dòng nếu không cần
 - Có thể dùng tiếng lóng, từ ngữ thông dụng
 - Tự nhiên như đang nói chuyện với bạn
 - Nếu không biết thì nói không biết
 
+EMOJI THEO CHỦ ĐỀ:
+- Thể thao: ⚽️🏀🎾🏐🏈⚾️🎯🏆🥇
+- Âm nhạc: 🎵🎶🎸🎹🥁🎧🎤🎷
+- Du lịch: 🏖️🗺️✈️🚗🏞️🏕️🌅
+- Học tập: 📚📖✏️📝🎓💡🧠
+- Ẩm thực: 🍜🍕🍣🍔🌮🍲☕️🍰
+- Thiên nhiên: 🌞🌙⭐️🌧️❄️🌈🌺🐶🐱
+-Công nghệ: 💻📱🖥️🎮🔧⚙️🚀
+- Cảm xúc: 😊😂😍😎🤔😢🔥💫
+
 VÍ DỤ:
 - "Có chứ, đẳng cấp lắm! 😎"
 - "Không, chưa đủ level đâu 💀"
-- "Chưa thử nhưng nghe bảo ngon 🍜"
-- "Hôm nay trời đẹp, đi chơi đi! ☀️"
+- "Đội hình gồm: Ronaldo, Messi, Neymar, Mbappé... ⚽️"
+- "JavaScript là ngôn ngữ lập trình cho web, chạy trên browser 💻"
 """
 
-# Hàm xác định loại tin nhắn - ĐÃ ĐƠN GIẢN HÓA
+# Hàm xác định loại tin nhắn
 def check_message_type(message_content, message_author):
     # CHỈ KIỂM TRA ĐỨC
     if (message_author.name.lower() == "vyanhduc" or 
@@ -75,6 +84,18 @@ def check_message_type(message_content, message_author):
     
     return "normal"
 
+# Hàm kiểm tra câu hỏi có cần trả lời dài không
+def need_long_answer(message_content):
+    message_lower = message_content.lower()
+    long_answer_keywords = [
+        'là gì', 'là ai', 'tại sao', 'như thế nào', 'hướng dẫn', 'cách',
+        'giải thích', 'định nghĩa', 'khái niệm', 'liệt kê', 'danh sách',
+        'đội hình', 'thành phần', 'cấu trúc', 'nguyên lý', 'cơ chế',
+        'so sánh', 'phân tích', 'đánh giá', 'quy trình', 'bước'
+    ]
+    
+    return any(keyword in message_lower for keyword in long_answer_keywords)
+
 # Hàm lấy lịch sử hội thoại theo channel
 def get_conversation_history(channel_id):
     history = conversation_history[channel_id]
@@ -82,7 +103,7 @@ def get_conversation_history(channel_id):
         return ""
     
     history_text = "Cuộc trò chuyện gần đây:\n"
-    for msg in list(history)[-20:]:  # Chỉ hiển thị 20 tin nhắn gần nhất
+    for msg in list(history)[-20:]:
         history_text += f"{msg}\n"
     return history_text + "\n"
 
@@ -91,7 +112,6 @@ def get_server_context():
     if not server_memory:
         return ""
     
-    # Lấy 50 tin nhắn gần nhất để phân tích ngữ cảnh
     recent_messages = list(server_memory)[-50:]
     
     context = "Thông tin về hoạt động server gần đây:\n"
@@ -108,14 +128,16 @@ def add_to_history(channel_id, message):
 def add_to_server_memory(message):
     server_memory.append(message)
 
-# Hàm phân tích ảnh - ĐÃ ĐƠN GIẢN HÓA
+# Hàm phân tích ảnh - ĐÃ CẬP NHẬT
 async def analyze_image(image_url, message_type, user_message="", history_text="", server_context=""):
     try:
         response = requests.get(image_url)
         image_data = response.content
         image = Image.open(io.BytesIO(image_data))
         
-        # Prompt cho từng loại người dùng
+        # Xác định độ dài câu trả lời dựa trên câu hỏi
+        is_long_answer = need_long_answer(user_message) if user_message else False
+        
         if message_type == "duc":
             prompt_text = f"""
 {personality}
@@ -128,8 +150,8 @@ Anh Đức gửi ảnh. {f"Anh ấy hỏi: '{user_message}'" if user_message els
 TRẢ LỜI:
 1. Phân tích ảnh NGẮN GỌN, TRỰC TIẾP
 2. Xưng 'em' gọi 'anh' một cách tự nhiên
-3. Dùng 1-2 emoji phù hợp
-4. Tối đa 20 chữ
+3. Dùng emoji phù hợp nội dung ảnh
+4. {'Có thể trả lời dài đến 60 từ nếu cần giải thích chi tiết' if is_long_answer else 'Ngắn gọn 5-25 chữ'}
 
 Phân tích:
 """
@@ -145,8 +167,8 @@ Có người gửi ảnh. {f"Họ hỏi: '{user_message}'" if user_message else 
 TRẢ LỜI:
 1. Phân tích ảnh TRỰC TIẾP, KHÔNG VÒNG VO
 2. Hạn chế xưng hô
-3. Dùng 1-2 emoji
-4. Tối đa 15 chữ
+3. Dùng emoji phù hợp
+4. {'Có thể trả lời dài đến 60 từ nếu cần giải thích chi tiết' if is_long_answer else 'Ngắn gọn 5-25 chữ'}
 
 Trả lời:
 """
@@ -166,7 +188,7 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
-    await client.change_presence(activity=discord.Game(name="Yoo Ji Min💫💫💫"))
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫"))
 
 @client.event
 async def on_message(message):
@@ -187,7 +209,6 @@ async def on_message(message):
     if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         try:
             async with message.channel.typing():
-                # Sử dụng channel_id làm key cho lịch sử hội thoại
                 channel_id = str(message.channel.id)
                 user_message = message.content.replace(f'<@{client.user.id}>', '').strip()
                 
@@ -195,16 +216,15 @@ async def on_message(message):
                 history_text = get_conversation_history(channel_id)
                 server_context = get_server_context()
                 
+                # Kiểm tra xem có cần trả lời dài không
+                is_long_answer = need_long_answer(user_message)
+                
                 # Xử lý ảnh đính kèm
                 if message.attachments:
                     for attachment in message.attachments:
                         if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
                             message_type = check_message_type(user_message, message.author)
                             analysis = await analyze_image(attachment.url, message_type, user_message, history_text, server_context)
-                            
-                            # Giới hạn độ dài
-                            if len(analysis) > 500:
-                                analysis = analysis[:497] + "..."
                             
                             await message.reply(analysis)
                             
@@ -228,9 +248,9 @@ async def on_message(message):
                     return
                 
                 message_type = check_message_type(user_message, message.author)
-                print(f"👤 {message.author.name}: {user_message} | Loại: {message_type}")
+                print(f"👤 {message.author.name}: {user_message} | Loại: {message_type} | Dài: {is_long_answer}")
 
-                # Prompt cho từng loại tin nhắn - HOÀN TOÀN MỚI
+                # Prompt cho từng loại tin nhắn - ĐÃ CẬP NHẬT
                 if message_type == "duc":
                     prompt = f"""
 {personality}
@@ -244,8 +264,8 @@ TRẢ LỜI:
 1. Trả lời TRỰC TIẾP, TINH TẾ
 2. Xưng 'em' gọi 'anh' tự nhiên
 3. Có thể kết thúc bằng "anh ạ", "nha anh"
-4. Dùng 1-2 emoji
-5. Tối đa 20 chữ
+4. Dùng emoji phù hợp
+5. {'Có thể trả lời dài đến 60 từ để giải thích chi tiết' if is_long_answer else 'Ngắn gọn 5-25 chữ'}
 6. KHÔNG vòng vo
 
 Em trả lời:
@@ -264,15 +284,15 @@ TRẢ LỜI:
 2. Có thể trả lời CÓ/KHÔNG trực tiếp
 3. Hạn chế xưng hô, nếu cần thì "mình"-"bạn"
 4. Tự nhiên, không khách sáo
-5. Dùng 1 emoji nếu thích hợp
-6. Tối đa 15 chữ
+5. Dùng emoji phù hợp với nội dung
+6. {'Có thể trả lời dài đến 60 từ để cung cấp thông tin đầy đủ' if is_long_answer else 'Ngắn gọn 5-25 chữ'}
 7. KHÔNG giải thích dài nếu không cần
 
 Ví dụ:
 - "Có! 🔥"
 - "Không đâu 💀"  
-- "Chưa thử 🧪"
-- "Đang làm rồi ⚡"
+- "Đội hình: Ronaldo, Messi, Neymar... ⚽️"
+- "JavaScript là ngôn ngữ lập trình web 💻"
 
 Trả lời:
 """
@@ -282,10 +302,12 @@ Trả lời:
                 if response.text:
                     response_text = response.text.strip()
                     
-                    # Giới hạn chữ ngắn hơn
+                    # Giới hạn chữ linh hoạt
                     words = response_text.split()
-                    if len(words) > 20:
-                        response_text = ' '.join(words[:20])
+                    if is_long_answer and len(words) > 60:
+                        response_text = ' '.join(words[:60]) + "..."
+                    elif not is_long_answer and len(words) > 25:
+                        response_text = ' '.join(words[:25])
                     
                     await message.reply(response_text)
                     print(f"🤖 Yoo Ji Min: {response_text}")
