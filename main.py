@@ -31,47 +31,29 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 
 # Lưu trữ lịch sử hội thoại theo channel_id
 conversation_history = defaultdict(lambda: deque(maxlen=200))
+
+# Lưu trữ tất cả tin nhắn trong server để học hỏi (chỉ đọc)
 server_memory = deque(maxlen=500)
 
 # Tính cách Yoo Ji Min - ĐÃ CẬP NHẬT
 personality = """
-Bạn là Yoo Ji Min, một thành viên trong server Discord này.
+Bạn là Yoo Ji Min, một thành viên thông minh và hữu ích trong server Discord này.
 
 TÍNH CÁCH:
-- TRỰC TIẾP, THẲNG THẮN, KHÔNG VÒNG VO
-- Trả lời ngắn gọn, đi thẳng vào vấn đề
-- Có thể trả lời CÓ/KHÔNG rõ ràng
-- Tự nhiên như bạn bè, không cần quá lịch sự
-- Dùng từ đơn giản, dễ hiểu
+- LỊCH SỰ, THẲNG THẮN nhưng TỬ TẾ
+- Trả lời phù hợp với từng loại câu hỏi:
+  + Câu hỏi đơn giản: trả lời ngắn gọn (5-35 chữ)
+  + Câu hỏi phức tạp, lý thuyết, thông tin chi tiết: có thể trả lời dài (đến 80 chữ)
+- Luôn đi thẳng vào vấn đề, không vòng vo
+- Dùng emoji ĐA DẠNG và PHÙ HỢP với nội dung
 - Hạn chế xưng hô, nếu cần thì xưng "mình" - "bạn"
-- Dùng emoji tự nhiên, phù hợp với sự vật sự việc
-
-CHỈ XỬ LÝ ĐẶC BIỆT:
-- Với Đức (vyanhduc): vẫn ngọt ngào, tinh tế, xưng em gọi anh
-
-CÁCH TRẢ LỜI:
-- Câu hỏi thông thường: trả lời 5-25 chữ
-- Câu hỏi lý thuyết, thông tin chi tiết, giải thích: có thể trả lời dài đến 60 từ
-- Trả lời trực tiếp câu hỏi, không giải thích dài dòng nếu không cần
-- Có thể dùng tiếng lóng, từ ngữ thông dụng
-- Tự nhiên như đang nói chuyện với bạn
-- Nếu không biết thì nói không biết
+- Với Đức (vyanhduc): ngọt ngào, tinh tế, xưng em gọi anh
 
 EMOJI THEO CHỦ ĐỀ:
-- Thể thao: ⚽️🏀🎾🏐🏈⚾️🎯🏆🥇
-- Âm nhạc: 🎵🎶🎸🎹🥁🎧🎤🎷
-- Du lịch: 🏖️🗺️✈️🚗🏞️🏕️🌅
-- Học tập: 📚📖✏️📝🎓💡🧠
-- Ẩm thực: 🍜🍕🍣🍔🌮🍲☕️🍰
-- Thiên nhiên: 🌞🌙⭐️🌧️❄️🌈🌺🐶🐱
--Công nghệ: 💻📱🖥️🎮🔧⚙️🚀
-- Cảm xúc: 😊😂😍😎🤔😢🔥💫
+🌞🌙⭐️🔥💧🌊🐶🐱🦋🐢🌷🌼🎵🎮📚✏️🎨⚽️🏀🍕🍜🍓☕️🎉🎊❤️💫🌟😊🎯🚀🌈🎭🎪🎸🏆🌍🦄🍀🎁🏖️🎈
+💡🔍📊🗂️🏅🎨🧩🔮🌅🏙️🌃🛋️📱💻🖥️⌚️🔦💎⚜️🧠💪👑📈📉🧪🔬⚖️🕰️🌡️🧭🧳
 
-VÍ DỤ:
-- "Có chứ, đẳng cấp lắm! 😎"
-- "Không, chưa đủ level đâu 💀"
-- "Đội hình gồm: Ronaldo, Messi, Neymar, Mbappé... ⚽️"
-- "JavaScript là ngôn ngữ lập trình cho web, chạy trên browser 💻"
+LUÔN DÙNG EMOJI PHÙ HỢP VÀ EMOJI KHÔNG TÍNH VÀO GIỚI HẠN CHỮ!
 """
 
 # Hàm xác định loại tin nhắn
@@ -84,17 +66,31 @@ def check_message_type(message_content, message_author):
     
     return "normal"
 
-# Hàm kiểm tra câu hỏi có cần trả lời dài không
-def need_long_answer(message_content):
-    message_lower = message_content.lower()
+# Hàm xác định loại câu hỏi để điều chỉnh độ dài trả lời
+def check_question_type(message_content):
+    content_lower = message_content.lower()
+    
+    # Các từ khóa cho câu hỏi cần trả lời dài
     long_answer_keywords = [
-        'là gì', 'là ai', 'tại sao', 'như thế nào', 'hướng dẫn', 'cách',
-        'giải thích', 'định nghĩa', 'khái niệm', 'liệt kê', 'danh sách',
-        'đội hình', 'thành phần', 'cấu trúc', 'nguyên lý', 'cơ chế',
-        'so sánh', 'phân tích', 'đánh giá', 'quy trình', 'bước'
+        'đội hình', 'cầu thủ', 'thành phần', 'danh sách', 'hướng dẫn',
+        'cách làm', 'tutorial', 'giải thích', 'phân tích', 'so sánh',
+        'lịch sử', 'nguyên nhân', 'quá trình', 'cấu trúc', 'thành phần',
+        'tính năng', 'ưu điểm', 'nhược điểm', 'review', 'đánh giá',
+        'công thức', 'bí quyết', 'kinh nghiệm', 'chiến thuật', 'chiến lược'
     ]
     
-    return any(keyword in message_lower for keyword in long_answer_keywords)
+    # Các từ khóa cho câu hỏi ngắn
+    short_answer_keywords = [
+        'có không', 'đúng không', 'phải không', 'bao nhiêu', 'khi nào',
+        'ở đâu', 'ai', 'gì', 'nào', 'ok', 'được', 'chưa', 'xong'
+    ]
+    
+    if any(keyword in content_lower for keyword in long_answer_keywords):
+        return "long"
+    elif any(keyword in content_lower for keyword in short_answer_keywords):
+        return "short"
+    else:
+        return "normal"
 
 # Hàm lấy lịch sử hội thoại theo channel
 def get_conversation_history(channel_id):
@@ -135,8 +131,7 @@ async def analyze_image(image_url, message_type, user_message="", history_text="
         image_data = response.content
         image = Image.open(io.BytesIO(image_data))
         
-        # Xác định độ dài câu trả lời dựa trên câu hỏi
-        is_long_answer = need_long_answer(user_message) if user_message else False
+        question_type = check_question_type(user_message) if user_message else "normal"
         
         if message_type == "duc":
             prompt_text = f"""
@@ -148,14 +143,14 @@ async def analyze_image(image_url, message_type, user_message="", history_text="
 Anh Đức gửi ảnh. {f"Anh ấy hỏi: '{user_message}'" if user_message else ""}
 
 TRẢ LỜI:
-1. Phân tích ảnh NGẮN GỌN, TRỰC TIẾP
+1. Phân tích ảnh CHI TIẾT và TINH TẾ
 2. Xưng 'em' gọi 'anh' một cách tự nhiên
-3. Dùng emoji phù hợp nội dung ảnh
-4. {'Có thể trả lời dài đến 60 từ nếu cần giải thích chi tiết' if is_long_answer else 'Ngắn gọn 5-25 chữ'}
+3. Dùng emoji đa dạng phù hợp nội dung ảnh
+4. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "25-40 chữ" }
 
 Phân tích:
 """
-        else:  # normal
+        else:
             prompt_text = f"""
 {personality}
 
@@ -165,10 +160,10 @@ Phân tích:
 Có người gửi ảnh. {f"Họ hỏi: '{user_message}'" if user_message else ""}
 
 TRẢ LỜI:
-1. Phân tích ảnh TRỰC TIẾP, KHÔNG VÒNG VO
+1. Phân tích ảnh CHI TIẾT và TỬ TẾ
 2. Hạn chế xưng hô
-3. Dùng emoji phù hợp
-4. {'Có thể trả lời dài đến 60 từ nếu cần giải thích chi tiết' if is_long_answer else 'Ngắn gọn 5-25 chữ'}
+3. Dùng emoji đa dạng phù hợp nội dung ảnh
+4. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "20-35 chữ" }
 
 Trả lời:
 """
@@ -177,7 +172,7 @@ Trả lời:
         return response.text.strip()
         
     except Exception as e:
-        return f"Lỗi ảnh rồi"
+        return f"Lỗi phân tích ảnh 😅"
 
 # Tạo Discord client
 intents = discord.Intents.default()
@@ -212,12 +207,12 @@ async def on_message(message):
                 channel_id = str(message.channel.id)
                 user_message = message.content.replace(f'<@{client.user.id}>', '').strip()
                 
-                # Lấy lịch sử hội thoại của kênh và ngữ cảnh server
+                # Xác định loại câu hỏi để điều chỉnh độ dài
+                question_type = check_question_type(user_message)
+                
+                # Lấy lịch sử hội thoại và ngữ cảnh server
                 history_text = get_conversation_history(channel_id)
                 server_context = get_server_context()
-                
-                # Kiểm tra xem có cần trả lời dài không
-                is_long_answer = need_long_answer(user_message)
                 
                 # Xử lý ảnh đính kèm
                 if message.attachments:
@@ -238,9 +233,9 @@ async def on_message(message):
                 if not user_message:
                     message_type = check_message_type("", message.author)
                     if message_type == "duc":
-                        response_text = "Dạ anh? 🌟"
+                        response_text = "Dạ anh cần em giúp gì ạ? 🌟"
                     else:
-                        response_text = "Gì? 😏"
+                        response_text = "Mình có thể giúp gì cho bạn? 😊"
                     
                     await message.reply(response_text)
                     add_to_history(channel_id, f"{message.author.display_name}: (tag)")
@@ -248,10 +243,16 @@ async def on_message(message):
                     return
                 
                 message_type = check_message_type(user_message, message.author)
-                print(f"👤 {message.author.name}: {user_message} | Loại: {message_type} | Dài: {is_long_answer}")
+                print(f"👤 {message.author.name}: {user_message} | Loại: {message_type} | Độ dài: {question_type}")
 
                 # Prompt cho từng loại tin nhắn - ĐÃ CẬP NHẬT
                 if message_type == "duc":
+                    length_guide = {
+                        "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
+                        "short": "trả lời NGẮN GỌN (15-25 chữ)", 
+                        "normal": "trả lời VỪA PHẢI (25-40 chữ)"
+                    }
+                    
                     prompt = f"""
 {personality}
 
@@ -261,16 +262,21 @@ async def on_message(message):
 Anh Đức hỏi: "{user_message}"
 
 TRẢ LỜI:
-1. Trả lời TRỰC TIẾP, TINH TẾ
-2. Xưng 'em' gọi 'anh' tự nhiên
-3. Có thể kết thúc bằng "anh ạ", "nha anh"
-4. Dùng emoji phù hợp
-5. {'Có thể trả lời dài đến 60 từ để giải thích chi tiết' if is_long_answer else 'Ngắn gọn 5-25 chữ'}
-6. KHÔNG vòng vo
+1. {length_guide[question_type]}
+2. Xưng 'em' gọi 'anh' một cách tự nhiên
+3. Dùng emoji ĐA DẠNG phù hợp chủ đề
+4. Lịch sự, tinh tế, đi thẳng vào vấn đề
+5. KHÔNG vòng vo, KHÔNG lan man
 
 Em trả lời:
 """
-                else:  # normal - TRỰC TIẾP
+                else:
+                    length_guide = {
+                        "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
+                        "short": "trả lời NGẮN GỌN (5-20 chữ)",
+                        "normal": "trả lời VỪA PHẢI (20-35 chữ)"
+                    }
+                    
                     prompt = f"""
 {personality}
 
@@ -280,19 +286,16 @@ Em trả lời:
 Câu hỏi: "{user_message}"
 
 TRẢ LỜI:
-1. TRẢ LỜI THẲNG VÀO VẤN ĐỀ
-2. Có thể trả lời CÓ/KHÔNG trực tiếp
-3. Hạn chế xưng hô, nếu cần thì "mình"-"bạn"
-4. Tự nhiên, không khách sáo
-5. Dùng emoji phù hợp với nội dung
-6. {'Có thể trả lời dài đến 60 từ để cung cấp thông tin đầy đủ' if is_long_answer else 'Ngắn gọn 5-25 chữ'}
-7. KHÔNG giải thích dài nếu không cần
+1. {length_guide[question_type]}
+2. Hạn chế xưng hô, nếu cần thì "mình"-"bạn"
+3. Dùng emoji ĐA DẠNG phù hợp chủ đề
+4. Lịch sự, thẳng thắn, đi thẳng vào vấn đề
+5. KHÔNG vòng vo, KHÔNG lan man
 
-Ví dụ:
-- "Có! 🔥"
-- "Không đâu 💀"  
-- "Đội hình: Ronaldo, Messi, Neymar... ⚽️"
-- "JavaScript là ngôn ngữ lập trình web 💻"
+Ví dụ cách trả lời:
+- Câu ngắn: "Có chứ! Đội hình gồm A, B, C... ⚽️"
+- Câu dài: "Đội hình nên có: thủ môn X, hậu vệ Y, tiền đạo Z... (chi tiết) 🏆"
+- Câu bình thường: "Theo mình nên chọn phương án A vì lý do B 📊"
 
 Trả lời:
 """
@@ -302,12 +305,14 @@ Trả lời:
                 if response.text:
                     response_text = response.text.strip()
                     
-                    # Giới hạn chữ linh hoạt
+                    # Giới hạn chữ linh hoạt theo loại câu hỏi
                     words = response_text.split()
-                    if is_long_answer and len(words) > 60:
-                        response_text = ' '.join(words[:60]) + "..."
-                    elif not is_long_answer and len(words) > 25:
-                        response_text = ' '.join(words[:25])
+                    if question_type == "long" and len(words) > 80:
+                        response_text = ' '.join(words[:80]) + "..."
+                    elif question_type == "short" and len(words) > 20:
+                        response_text = ' '.join(words[:20])
+                    elif question_type == "normal" and len(words) > 35:
+                        response_text = ' '.join(words[:35])
                     
                     await message.reply(response_text)
                     print(f"🤖 Yoo Ji Min: {response_text}")
@@ -316,14 +321,14 @@ Trả lời:
                     add_to_history(channel_id, f"{message.author.display_name}: {user_message}")
                     add_to_history(channel_id, f"Yoo Ji Min: {response_text}")
                 else:
-                    error_msg = "Hỏi gì? 🤨"
+                    error_msg = "Xin lỗi, mình chưa hiểu rõ câu hỏi. Bạn có thể hỏi lại được không? 🤔"
                     await message.reply(error_msg)
                     add_to_history(channel_id, f"{message.author.display_name}: {user_message}")
                     add_to_history(channel_id, f"Yoo Ji Min: {error_msg}")
                     
         except Exception as e:
             print(f"❌ Lỗi: {e}")
-            error_msg = "Lỗi rồi!"
+            error_msg = "Có lỗi xảy ra, bạn thử lại nhé! 😅"
             await message.reply(error_msg)
 
 # Tạo web server đơn giản
