@@ -4,8 +4,6 @@ import asyncio
 import re
 import requests
 import io
-import aiohttp
-import base64
 from PIL import Image
 import os
 import flask
@@ -17,7 +15,6 @@ import time
 # Lấy token từ environment variables
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-HUGGINGFACE_TOKEN = os.getenv('HUGGINGFACE_TOKEN')
 
 # Kiểm tra environment variables
 if not DISCORD_TOKEN:
@@ -31,7 +28,7 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 
 # Cấu hình Gemini
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-3-pro-preview')
 
 # Lưu trữ lịch sử hội thoại theo channel_id
 conversation_history = defaultdict(lambda: deque(maxlen=200))
@@ -230,7 +227,7 @@ Lời chúc của em:
                     info["last_birthday_wish"] = today.strftime("%Y-%m-%d")
                     print(f"🎂 Đã gửi lời chúc sinh nhật tới {info['name']}")
 
-# Hàm test sinh nhật
+# Hàm test sinh nhật - ĐÃ SỬA LỖI
 async def test_birthday(client, username, channel):
     """Hàm test chúc mừng sinh nhật (dùng cho testing)"""
     if username in server_members:
@@ -271,7 +268,7 @@ Lời chúc của em:
     else:
         await channel.send(f"❌ Không tìm thấy thông tin cho username: {username}")
 
-# Hàm hiển thị thông tin thành viên
+# Hàm hiển thị thông tin thành viên - ĐÃ SỬA LỖI
 async def show_member_info(username, channel):
     """Hiển thị thông tin thành viên"""
     if username in server_members:
@@ -302,156 +299,6 @@ async def show_member_info(username, channel):
         await channel.send(response)
     else:
         await channel.send(f"❌ Không tìm thấy thông tin cho username: {username}")
-
-# CÁC MODEL TẠO ẢNH DỰ PHÒNG
-MODELS = {
-    "stable-diffusion-v1-5": "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5",
-    "stable-diffusion-2-1": "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1",
-    "openjourney": "https://api-inference.huggingface.co/models/prompthero/openjourney",
-    "anything-v3": "https://api-inference.huggingface.co/models/Linaqruf/anything-v3.0"
-}
-
-# Hàm tạo ảnh
-async def generate_image(prompt, retry_count=3):
-    """Tạo ảnh bằng Stable Diffusion API từ Hugging Face"""
-    try:
-        HF_TOKEN = os.getenv('HUGGINGFACE_TOKEN')
-        
-        if not HF_TOKEN:
-            print("❌ HUGGINGFACE_TOKEN không tồn tại!")
-            return None
-        
-        headers = {
-            "Authorization": f"Bearer {HF_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "inputs": prompt,
-            "parameters": {
-                "width": 512,
-                "height": 512,
-                "num_inference_steps": 20,
-                "guidance_scale": 7.5
-            },
-            "options": {
-                "wait_for_model": True,
-                "use_cache": True
-            }
-        }
-        
-        # THỬ CÁC MODEL KHÁC NHAU
-        models_to_try = ["stable-diffusion-v1-5", "stable-diffusion-2-1", "openjourney"]
-        
-        for model_name in models_to_try:
-            API_URL = MODELS[model_name]
-            print(f"🔄 Thử model: {model_name}")
-            
-            async with aiohttp.ClientSession() as session:
-                for attempt in range(retry_count):
-                    try:
-                        async with session.post(API_URL, headers=headers, json=payload, timeout=120) as response:
-                            print(f"📡 {model_name} - Status: {response.status}")
-                            
-                            if response.status == 200:
-                                image_data = await response.read()
-                                print(f"✅ Thành công với model: {model_name}")
-                                
-                                try:
-                                    image = Image.open(io.BytesIO(image_data))
-                                    return image_data
-                                except Exception as img_error:
-                                    print(f"❌ Lỗi ảnh từ {model_name}: {img_error}")
-                                    continue
-                            
-                            elif response.status == 503:
-                                print(f"⏳ {model_name} đang loading...")
-                                await asyncio.sleep(30)
-                                continue
-                                
-                            else:
-                                error_text = await response.text()
-                                print(f"❌ {model_name} lỗi: {response.status}")
-                                break
-                                
-                    except asyncio.TimeoutError:
-                        print(f"⏰ {model_name} timeout")
-                        continue
-                    except Exception as e:
-                        print(f"❌ {model_name} lỗi kết nối: {e}")
-                        continue
-            
-            print(f"⚠️ Chuyển sang model tiếp theo...")
-            await asyncio.sleep(5)
-        
-        print("❌ Tất cả model đều thất bại")
-        return None
-        
-    except Exception as e:
-        print(f"❌ Lỗi tổng thể: {e}")
-        return None
-
-# Hàm xử lý tạo ảnh
-async def handle_image_generation(message, prompt):
-    """Xử lý lệnh tạo ảnh"""
-    HF_TOKEN = os.getenv('HUGGINGFACE_TOKEN')
-    
-    if not HF_TOKEN:
-        await message.channel.send("❌ **Lỗi cấu hình:** Chưa cấu hình Hugging Face Token!\nHãy liên hệ admin để thêm `HUGGINGFACE_TOKEN` vào environment variables.")
-        return
-    
-    if not prompt:
-        await message.channel.send("❌ **Thiếu prompt:** Vui lòng cung cấp mô tả để tạo ảnh!\nVí dụ: `@Yoo Ji Min tạo ảnh một chú mèo dễ thương`")
-        return
-    
-    # Thông báo đang xử lý
-    processing_msg = await message.channel.send(f"🎨 **Đang tạo ảnh...**\n📝 Prompt: *{prompt}*\n⏳ Có thể mất 1-2 phút...")
-    
-    try:
-        print(f"🚀 Bắt đầu tạo ảnh với prompt: {prompt}")
-        
-        # Gọi hàm tạo ảnh
-        image_data = await generate_image(prompt)
-        
-        if image_data:
-            # Tạo file ảnh và gửi
-            with io.BytesIO(image_data) as image_file:
-                filename = f"generated_{int(time.time())}.png"
-                
-                # Tạo embed
-                embed = discord.Embed(
-                    title="🎨 Ảnh Đã Được Tạo!",
-                    description=f"**Prompt:** {prompt}",
-                    color=0x00ff00,
-                    timestamp=datetime.datetime.now()
-                )
-                embed.set_footer(text="Tạo bởi Yoo Ji Min • Stable Diffusion")
-                
-                # Gửi ảnh
-                file = discord.File(image_file, filename=filename)
-                embed.set_image(url=f"attachment://{filename}")
-                
-                await processing_msg.delete()
-                await message.channel.send(embed=embed, file=file)
-                
-                print(f"✅ Đã tạo và gửi ảnh thành công!")
-        else:
-            error_msg = """
-❌ **Không thể tạo ảnh.** Có thể do:
-
-• 🤖 **Model đang bận** - Thử lại sau 1-2 phút
-• 🔑 **Token không hợp lệ** - Kiểm tra Hugging Face Token
-• 📝 **Prompt không phù hợp** - Thử prompt đơn giản hơn
-• 🌐 **Lỗi kết nối** - Kiểm tra internet
-
-**💡 Mẹo:** Thử prompt tiếng Anh đơn giản như "a cute cat" hoặc "beautiful landscape"
-"""
-            await processing_msg.edit(content=error_msg)
-            
-    except Exception as e:
-        error_msg = f"❌ **Lỗi hệ thống:** {str(e)}\nVui lòng thử lại sau!"
-        await processing_msg.edit(content=error_msg)
-        print(f"❌ Lỗi xử lý tạo ảnh: {e}")
 
 # Hàm phân tích ảnh
 async def analyze_image(image_url, message_type, user_message="", history_text="", server_context=""):
@@ -529,7 +376,7 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
-    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫💫💫"))
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫"))
     
     # Bắt đầu task kiểm tra sinh nhật mỗi ngày
     client.loop.create_task(birthday_check_loop())
@@ -578,20 +425,6 @@ async def on_message(message):
         else:
             await message.channel.send("❌ Cú pháp: `!member_info username`")
         return
-
-    # XỬ LÝ LỆNH TẠO ẢNH
-    if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
-        user_message = message.content.replace(f'<@{client.user.id}>', '').strip().lower()
-        
-        # Kiểm tra lệnh tạo ảnh
-        if any(keyword in user_message for keyword in ['tạo ảnh', 'generate image', 'vẽ ảnh', 'tạo hình']):
-            # Trích xuất prompt (bỏ từ khóa lệnh)
-            prompt = user_message
-            for keyword in ['tạo ảnh', 'generate image', 'vẽ ảnh', 'tạo hình']:
-                prompt = prompt.replace(keyword, '').strip()
-            
-            await handle_image_generation(message, prompt)
-            return
 
     # XỬ LÝ CÂU HỎI VỀ THÔNG TIN THÀNH VIÊN KHI ĐƯỢC TAG
     if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
