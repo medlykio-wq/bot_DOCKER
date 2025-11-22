@@ -11,6 +11,8 @@ import threading
 from collections import defaultdict, deque
 import datetime
 import time
+# IMPORT TRỰC TIẾP CLASS TẠO ẢNH ĐỂ KHẮC PHỤC LỖI ATTRIBUTE ERROR
+from google.generativeai import ImageGenerationModel 
 
 # Lấy token từ environment variables
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -39,19 +41,20 @@ except Exception:
     model = genai.GenerativeModel('gemini-2.5-flash')
     print("⚠️ Chat Model: Gemini 2.5 Flash (Fallback)")
 
-# --- CẤU HÌNH MODEL TẠO ẢNH (ĐÃ SỬA LỖI) ---
+# --- CẤU HÌNH MODEL TẠO ẢNH (ĐÃ FIX LỖI IMPORT) ---
 imagen_model = None
 try:
-    # Cú pháp đúng: Phải dùng .from_pretrained
-    imagen_model = genai.ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
+    # SỬ DỤNG CLASS ĐÃ IMPORT TRỰC TIẾP
+    imagen_model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
     print("✅ Image Model: Imagen 3 (Nano Banana)")
 except Exception as e:
-    print(f"⚠️ Chưa tải được Imagen 3: {e}")
+    print(f"⚠️ Chưa tải được Imagen 3. Lỗi: {e}")
     try:
-        imagen_model = genai.ImageGenerationModel.from_pretrained("imagen-2")
+        # Fallback về Imagen 2
+        imagen_model = ImageGenerationModel.from_pretrained("imagen-2")
         print("✅ Image Model: Imagen 2 (Fallback)")
     except Exception as e2:
-        print(f"❌ Không tải được model tạo ảnh nào: {e2}")
+        print(f"❌ Không tải được model tạo ảnh nào. Lỗi: {e2}")
 
 # Lưu trữ lịch sử hội thoại
 conversation_history = defaultdict(lambda: deque(maxlen=200))
@@ -71,7 +74,7 @@ server_members = {
 personality = """
 Bạn là Yoo Ji Min, một thành viên thông minh và hữu ích trong server Discord này.
 TÍNH CÁCH:
-- LỊCH SỰ, THẲNG THẲN nhưng TỬ TẾ
+- LỊCH SỰ, THẲNG THẮN nhưng TỬ TẾ
 - Trả lời phù hợp: Câu đơn giản (5-35 chữ), câu phức tạp (đến 80 chữ)
 - Luôn đi thẳng vào vấn đề
 - Dùng emoji ĐA DẠNG và PHÙ HỢP
@@ -153,7 +156,7 @@ async def analyze_image(image_url, user_message):
         return response.text.strip()
     except: return "Lỗi khi xem ảnh 😅"
 
-# --- HÀM TẠO ẢNH (FIXED) ---
+# --- HÀM TẠO ẢNH ---
 async def generate_image(prompt_text):
     if not imagen_model:
         return None
