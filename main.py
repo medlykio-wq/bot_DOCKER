@@ -11,6 +11,8 @@ import threading
 from collections import defaultdict, deque
 import datetime
 import time
+import aiohttp
+import urllib.parse
 
 # Lấy token từ environment variables
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -104,6 +106,38 @@ EMOJI THEO CHỦ ĐỀ:
 LUÔN DÙNG EMOJI PHÙ HỢP VÀ EMOJI KHÔNG TÍNH VÀO GIỚI HẠN CHỮ!
 """
 
+# Hàm tạo ảnh bằng Pollinations AI - MỚI THÊM
+async def generate_birthday_image(name, age, job):
+    """Tạo ảnh chúc mừng sinh nhật bằng Pollinations AI"""
+    try:
+        # Tạo prompt cho ảnh sinh nhật dựa trên thông tin
+        prompt = f"""
+        Beautiful digital art celebrating birthday for {name} who is {age} years old and works as {job}.
+        Birthday cake with candles, colorful balloons, festive decorations, happy birthday theme,
+        vibrant colors, detailed illustration, 4K resolution, professional artwork, joyful atmosphere.
+        Style: digital painting, vibrant, celebratory.
+        """
+        
+        # Mã hóa prompt
+        encoded_prompt = urllib.parse.quote(prompt)
+        
+        # URL Pollinations AI với Flux model, độ phân giải 1024x1024
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
+        
+        # Tải ảnh
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    image_data = await response.read()
+                    return image_data
+                else:
+                    print(f"❌ Lỗi tải ảnh: {response.status}")
+                    return None
+                    
+    except Exception as e:
+        print(f"❌ Lỗi tạo ảnh: {e}")
+        return None
+
 # Hàm xác định loại tin nhắn
 def check_message_type(message_content, message_author):
     content_lower = message_content.lower()
@@ -178,7 +212,7 @@ def add_to_history(channel_id, message):
 def add_to_server_memory(message):
     server_memory.append(message)
 
-# Hàm kiểm tra sinh nhật
+# Hàm kiểm tra sinh nhật - ĐÃ CẬP NHẬT
 async def check_birthdays(client):
     today = datetime.datetime.now()
     today_day = today.day
@@ -215,19 +249,31 @@ Lời chúc của em:
                     response = model.generate_content(birthday_prompt)
                     birthday_message = response.text.strip()
                     
+                    # TẠO ẢNH SINH NHẬT - MỚI THÊM
+                    image_data = await generate_birthday_image(info['name'], age, info['job'])
+                    
                     # Gửi lời chúc đến kênh chung
                     for guild in client.guilds:
                         for channel in guild.text_channels:
                             if channel.permissions_for(guild.me).send_messages:
-                                await channel.send(f"🎉 **Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}")
+                                if image_data:
+                                    # Tạo file ảnh từ dữ liệu
+                                    image_file = discord.File(io.BytesIO(image_data), filename=f"birthday_{info['name']}.png")
+                                    await channel.send(
+                                        f"🎉 **Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}",
+                                        file=image_file
+                                    )
+                                    print(f"🎂 Đã gửi lời chúc và ảnh sinh nhật tới {info['name']}")
+                                else:
+                                    await channel.send(f"🎉 **Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}")
+                                    print(f"🎂 Đã gửi lời chúc sinh nhật tới {info['name']} (không có ảnh)")
                                 break
                         break
                     
                     # Đánh dấu đã chúc mừng trong ngày
                     info["last_birthday_wish"] = today.strftime("%Y-%m-%d")
-                    print(f"🎂 Đã gửi lời chúc sinh nhật tới {info['name']}")
 
-# Hàm test sinh nhật - ĐÃ SỬA LỖI
+# Hàm test sinh nhật - ĐÃ CẬP NHẬT VỚI ẢNH
 async def test_birthday(client, username, channel):
     """Hàm test chúc mừng sinh nhật (dùng cho testing)"""
     if username in server_members:
@@ -251,6 +297,9 @@ Lời chúc của em:
         response = model.generate_content(birthday_prompt)
         birthday_message = response.text.strip()
         
+        # TẠO ẢNH SINH NHẬT - MỚI THÊM
+        image_data = await generate_birthday_image(info['name'], age, info['job'])
+        
         # Tìm user trong server
         user = None
         for guild in client.guilds:
@@ -259,16 +308,32 @@ Lời chúc của em:
                 break
         
         if user:
-            await channel.send(f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}")
-            print(f"✅ Đã test chúc mừng sinh nhật cho {info['name']}")
+            if image_data:
+                # Gửi kèm ảnh
+                image_file = discord.File(io.BytesIO(image_data), filename=f"test_birthday_{info['name']}.png")
+                await channel.send(
+                    f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}",
+                    file=image_file
+                )
+                print(f"✅ Đã test chúc mừng sinh nhật cho {info['name']} (có ảnh)")
+            else:
+                await channel.send(f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}")
+                print(f"✅ Đã test chúc mừng sinh nhật cho {info['name']} (không có ảnh)")
         else:
             # Nếu không tìm thấy user, vẫn gửi thông báo
-            await channel.send(f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n**{info['name']}** ({username})\n{birthday_message}")
+            if image_data:
+                image_file = discord.File(io.BytesIO(image_data), filename=f"test_birthday_{info['name']}.png")
+                await channel.send(
+                    f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n**{info['name']}** ({username})\n{birthday_message}",
+                    file=image_file
+                )
+            else:
+                await channel.send(f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n**{info['name']}** ({username})\n{birthday_message}")
             print(f"⚠️ Không tìm thấy user {username}, nhưng đã gửi test sinh nhật cho {info['name']}")
     else:
         await channel.send(f"❌ Không tìm thấy thông tin cho username: {username}")
 
-# Hàm hiển thị thông tin thành viên - ĐÃ SỬA LỖI
+# Hàm hiển thị thông tin thành viên
 async def show_member_info(username, channel):
     """Hiển thị thông tin thành viên"""
     if username in server_members:
