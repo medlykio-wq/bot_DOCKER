@@ -11,8 +11,6 @@ import threading
 from collections import defaultdict, deque
 import datetime
 import time
-# IMPORT TRỰC TIẾP CLASS TẠO ẢNH ĐỂ KHẮC PHỤC LỖI ATTRIBUTE ERROR
-from google.generativeai import ImageGenerationModel 
 
 # Lấy token từ environment variables
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -30,259 +28,634 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 
 # Cấu hình Gemini
 genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-3.0-pro')
 
-# --- CẤU HÌNH MODEL CHAT ---
-try:
-    # Thử dùng model Pro mới nhất
-    model = genai.GenerativeModel('gemini-3.0-pro')
-    print("✅ Chat Model: Gemini 3.0 Pro")
-except Exception:
-    # Fallback về bản Flash nếu lỗi
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    print("⚠️ Chat Model: Gemini 2.5 Flash (Fallback)")
-
-# --- CẤU HÌNH MODEL TẠO ẢNH (ĐÃ FIX LỖI IMPORT) ---
-imagen_model = None
-try:
-    # SỬ DỤNG CLASS ĐÃ IMPORT TRỰC TIẾP
-    imagen_model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
-    print("✅ Image Model: Imagen 3 (Nano Banana)")
-except Exception as e:
-    print(f"⚠️ Chưa tải được Imagen 3. Lỗi: {e}")
-    try:
-        # Fallback về Imagen 2
-        imagen_model = ImageGenerationModel.from_pretrained("imagen-2")
-        print("✅ Image Model: Imagen 2 (Fallback)")
-    except Exception as e2:
-        print(f"❌ Không tải được model tạo ảnh nào. Lỗi: {e2}")
-
-# Lưu trữ lịch sử hội thoại
+# Lưu trữ lịch sử hội thoại theo channel_id
 conversation_history = defaultdict(lambda: deque(maxlen=200))
+
+# Lưu trữ tất cả tin nhắn trong server để học hỏi (chỉ đọc)
 server_memory = deque(maxlen=500)
 
 # Thông tin thành viên server
 server_members = {
-    "demacianking1": {"name": "Cường", "birthday": {"day": 5, "month": 1}, "year": 2000, "job": "IT", "last_birthday_wish": None},
-    "thanh0374": {"name": "Thành", "birthday": {"day": 19, "month": 10}, "year": 2000, "job": "IT", "last_birthday_wish": None},
-    "dangialanrangu": {"name": "Dũng Còi", "birthday": {"day": 17, "month": 11}, "year": 2000, "job": "kiến trúc sư", "last_birthday_wish": None},
-    "manted1229": {"name": "Ngọc Điếc", "birthday": {"day": 4, "month": 1}, "year": 2000, "job": "Bác sĩ", "last_birthday_wish": None},
-    "vyanhduc": {"name": "Đức", "birthday": {"day": 25, "month": 12}, "year": 1999, "job": "Music Producer", "last_birthday_wish": None},
-    "pta.zyud": {"name": "Tuấn Anh", "birthday": {"day": 6, "month": 6}, "year": 2000, "job": "Bác sĩ", "last_birthday_wish": None}
+    "demacianking1": {
+        "name": "Cường",
+        "birthday": {"day": 5, "month": 1},
+        "year": 2000,
+        "job": "IT",
+        "last_birthday_wish": None
+    },
+    "thanh0374": {
+        "name": "Thành", 
+        "birthday": {"day": 19, "month": 10},
+        "year": 2000,
+        "job": "IT",
+        "last_birthday_wish": None
+    },
+    "dangialanrangu": {
+        "name": "Dũng Còi",
+        "birthday": {"day": 17, "month": 11},
+        "year": 2000,
+        "job": "kiến trúc sư",
+        "last_birthday_wish": None
+    },
+    "manted1229": {
+        "name": "Ngọc Điếc",
+        "birthday": {"day": 4, "month": 1},
+        "year": 2000,
+        "job": "Bác sĩ",
+        "last_birthday_wish": None
+    },
+    "vyanhduc": {
+        "name": "Đức",
+        "birthday": {"day": 25, "month": 12},
+        "year": 1999,
+        "job": "Music Producer",
+        "last_birthday_wish": None
+    },
+    "pta.zyud": {
+        "name": "Tuấn Anh",
+        "birthday": {"day": 6, "month": 6},
+        "year": 2000,
+        "job": "Bác sĩ",
+        "last_birthday_wish": None
+    }
 }
 
 # Tính cách Yoo Ji Min
 personality = """
 Bạn là Yoo Ji Min, một thành viên thông minh và hữu ích trong server Discord này.
+
 TÍNH CÁCH:
-- LỊCH SỰ, THẲNG THẮN nhưng TỬ TẾ
-- Trả lời phù hợp: Câu đơn giản (5-35 chữ), câu phức tạp (đến 80 chữ)
-- Luôn đi thẳng vào vấn đề
-- Dùng emoji ĐA DẠNG và PHÙ HỢP
+- LỊCH SỰ, THẲNG THẲN nhưng TỬ TẾ
+- Trả lời phù hợp với từng loại câu hỏi:
+  + Câu hỏi đơn giản: trả lời ngắn gọn (5-35 chữ)
+  + Câu hỏi phức tạp, lý thuyết, thông tin chi tiết: có thể trả lời dài (đến 80 chữ)
+- Luôn đi thẳng vào vấn đề, không vòng vo
+- Dùng emoji ĐA DẠNG và PHÙ HỢP với nội dung
 - Nếu người khác xưng "anh" thì xưng "em" lại
 - Với Đức (vyanhduc): luôn ngọt ngào, tinh tế, xưng em gọi anh
 - Hạn chế xưng hô, nếu cần thì xưng "mình" - "bạn"
-EMOJI: 🌞🌙⭐️🔥💧🌊🐶🐱🦋🌷🎵🎮📚🎨⚽️🍕☕️🎉❤️💫😊🎯🚀🌈🎪🎸🏆🌍🦄🎁🎈
+
+EMOJI THEO CHỦ ĐỀ:
+🌞🌙⭐️🔥💧🌊🐶🐱🦋🐢🌷🌼🎵🎮📚✏️🎨⚽️🏀🍕🍜🍓☕️🎉🎊❤️💫🌟😊🎯🚀🌈🎭🎪🎸🏆🌍🦄🍀🎁🏖️🎈
+💡🔍📊🗂️🏅🎨🧩🔮🌅🏙️🌃🛋️📱💻🖥️⌚️🔦💎⚜️🧠💪👑📈📉🧪🔬⚖️🕰️🌡️🧭🧳🎂🎁🎊🎉🥳✨🎇🎆
+
+LUÔN DÙNG EMOJI PHÙ HỢP VÀ EMOJI KHÔNG TÍNH VÀO GIỚI HẠN CHỮ!
 """
 
-# Các hàm phụ trợ
+# Hàm xác định loại tin nhắn
 def check_message_type(message_content, message_author):
     content_lower = message_content.lower()
+    
+    # KIỂM TRA ĐỨC ĐẦU TIÊN
     if (message_author.name.lower() == "vyanhduc" or 
         (message_author.display_name and "đức" in message_author.display_name.lower()) or
         (message_author.display_name and "duc" in message_author.display_name.lower())):
         return "duc"
+    
+    # Kiểm tra nếu người gửi xưng "anh"
     if " anh " in content_lower or content_lower.startswith("anh ") or content_lower.endswith(" anh"):
         return "brother"
+    
     return "normal"
 
+# Hàm xác định loại câu hỏi để điều chỉnh độ dài trả lời
 def check_question_type(message_content):
     content_lower = message_content.lower()
-    long_kw = ['hướng dẫn', 'giải thích', 'phân tích', 'so sánh', 'nguyên nhân', 'chi tiết', 'như thế nào', 'tại sao', 'review']
-    short_kw = ['có không', 'đúng không', 'mấy giờ', 'khi nào', 'ở đâu', 'ai', 'gì', 'ok', 'được']
-    if any(k in content_lower for k in long_kw): return "long"
-    elif any(k in content_lower for k in short_kw): return "short"
-    return "normal"
+    
+    # Các từ khóa cho câu hỏi cần trả lời dài
+    long_answer_keywords = [
+        'đội hình', 'cầu thủ', 'thành phần', 'danh sách', 'hướng dẫn',
+        'cách làm', 'tutorial', 'giải thích', 'phân tích', 'so sánh',
+        'lịch sử', 'nguyên nhân', 'quá trình', 'cấu trúc', 'thành phần',
+        'tính năng', 'ưu điểm', 'nhược điểm', 'review', 'đánh giá',
+        'công thức', 'bí quyết', 'kinh nghiệm', 'chiến thuật', 'chiến lược'
+    ]
+    
+    # Các từ khóa cho câu hỏi ngắn
+    short_answer_keywords = [
+        'có không', 'đúng không', 'phải không', 'bao nhiêu', 'khi nào',
+        'ở đâu', 'ai', 'gì', 'nào', 'ok', 'được', 'chưa', 'xong'
+    ]
+    
+    if any(keyword in content_lower for keyword in long_answer_keywords):
+        return "long"
+    elif any(keyword in content_lower for keyword in short_answer_keywords):
+        return "short"
+    else:
+        return "normal"
 
+# Hàm lấy lịch sử hội thoại theo channel
 def get_conversation_history(channel_id):
     history = conversation_history[channel_id]
-    if not history: return ""
-    return "Lịch sử chat:\n" + "\n".join(list(history)[-20:]) + "\n"
+    if not history:
+        return ""
+    
+    history_text = "Cuộc trò chuyện gần đây:\n"
+    for msg in list(history)[-20:]:
+        history_text += f"{msg}\n"
+    return history_text + "\n"
 
+# Hàm lấy thông tin tổng quan về server từ memory
+def get_server_context():
+    if not server_memory:
+        return ""
+    
+    recent_messages = list(server_memory)[-50:]
+    
+    context = "Thông tin về hoạt động server gần đây:\n"
+    for msg in recent_messages:
+        context += f"{msg}\n"
+    
+    return context + "\n"
+
+# Hàm thêm tin nhắn vào lịch sử theo channel
 def add_to_history(channel_id, message):
     conversation_history[channel_id].append(message)
 
+# Hàm thêm tin nhắn vào server memory (chỉ đọc)
 def add_to_server_memory(message):
     server_memory.append(message)
 
-# Sinh nhật
+# Hàm kiểm tra sinh nhật
 async def check_birthdays(client):
     today = datetime.datetime.now()
+    today_day = today.day
+    today_month = today.month
+    
     for username, info in server_members.items():
-        if info["birthday"]["day"] == today.day and info["birthday"]["month"] == today.month:
-            if info.get("last_birthday_wish") != today.strftime("%Y-%m-%d"):
-                user = discord.utils.get(client.get_all_members(), name=username)
+        if info["birthday"]["day"] == today_day and info["birthday"]["month"] == today_month:
+            # Kiểm tra đã chúc mừng trong ngày hôm nay chưa
+            last_wish = info.get("last_birthday_wish")
+            if last_wish != today.strftime("%Y-%m-%d"):
+                # Tìm user trong server
+                user = None
+                for guild in client.guilds:
+                    user = guild.get_member_named(username)
+                    if user:
+                        break
+                
                 if user:
+                    # Tạo lời chúc mừng sinh nhật
                     age = today.year - info["year"]
-                    prompt = f"Chúc mừng sinh nhật {info['name']} ({age} tuổi, {info['job']}). Viết lời chúc ngắn gọn, ý nghĩa, xưng em."
-                    try:
-                        resp = model.generate_content(prompt)
-                        msg = resp.text.strip()
-                        for guild in client.guilds:
-                            if guild.system_channel: await guild.system_channel.send(f"🎉 {user.mention} {msg}"); break
-                    except: pass
-                    info["last_birthday_wish"] = today.strftime("%Y-%m-%d")
+                    birthday_prompt = f"""
+Hôm nay là sinh nhật của {info['name']} ({username}) - {age} tuổi, nghề nghiệp: {info['job']}.
 
+Hãy viết một lời chúc mừng sinh nhật thật ý nghĩa và chân thành:
+- Xưng 'em' gọi 'anh'
+- Nhắc đến tuổi mới và nghề nghiệp của họ
+- Chúc những điều tốt đẹp trong công việc và cuộc sống
+- Dùng nhiều emoji sinh nhật vui vẻ
+- Độ dài: khoảng 50-100 chữ
+- Thật tâm và ấm áp
+
+Lời chúc của em:
+"""
+                    response = model.generate_content(birthday_prompt)
+                    birthday_message = response.text.strip()
+                    
+                    # Gửi lời chúc đến kênh chung
+                    for guild in client.guilds:
+                        for channel in guild.text_channels:
+                            if channel.permissions_for(guild.me).send_messages:
+                                await channel.send(f"🎉 **Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}")
+                                break
+                        break
+                    
+                    # Đánh dấu đã chúc mừng trong ngày
+                    info["last_birthday_wish"] = today.strftime("%Y-%m-%d")
+                    print(f"🎂 Đã gửi lời chúc sinh nhật tới {info['name']}")
+
+# Hàm test sinh nhật - ĐÃ SỬA LỖI
 async def test_birthday(client, username, channel):
+    """Hàm test chúc mừng sinh nhật (dùng cho testing)"""
     if username in server_members:
         info = server_members[username]
-        prompt = f"Viết lời chúc sinh nhật test cho {info['name']}."
-        resp = model.generate_content(prompt)
-        await channel.send(f"🎉 **TEST:** {resp.text}")
+        
+        # Tạo lời chúc mừng sinh nhật
+        age = datetime.datetime.now().year - info["year"]
+        birthday_prompt = f"""
+Hôm nay là sinh nhật TEST của {info['name']} ({username}) - {age} tuổi, nghề nghiệp: {info['job']}.
 
+Hãy viết một lời chúc mừng sinh nhật thật ý nghĩa và chân thành:
+- Xưng 'em' gọi 'anh'
+- Nhắc đến tuổi mới và nghề nghiệp của họ
+- Chúc những điều tốt đẹp trong công việc và cuộc sống
+- Dùng nhiều emoji sinh nhật vui vẻ
+- Độ dài: khoảng 50-100 chữ
+- Thật tâm và ấm áp
+
+Lời chúc của em:
+"""
+        response = model.generate_content(birthday_prompt)
+        birthday_message = response.text.strip()
+        
+        # Tìm user trong server
+        user = None
+        for guild in client.guilds:
+            user = guild.get_member_named(username)
+            if user:
+                break
+        
+        if user:
+            await channel.send(f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}")
+            print(f"✅ Đã test chúc mừng sinh nhật cho {info['name']}")
+        else:
+            # Nếu không tìm thấy user, vẫn gửi thông báo
+            await channel.send(f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n**{info['name']}** ({username})\n{birthday_message}")
+            print(f"⚠️ Không tìm thấy user {username}, nhưng đã gửi test sinh nhật cho {info['name']}")
+    else:
+        await channel.send(f"❌ Không tìm thấy thông tin cho username: {username}")
+
+# Hàm hiển thị thông tin thành viên - ĐÃ SỬA LỖI
 async def show_member_info(username, channel):
+    """Hiển thị thông tin thành viên"""
     if username in server_members:
         info = server_members[username]
         today = datetime.datetime.now()
         age = today.year - info["year"]
-        await channel.send(f"ℹ️ **{info['name']}** ({age} tuổi) - {info['job']}. SN: {info['birthday']['day']}/{info['birthday']['month']}")
+        next_birthday = datetime.datetime(today.year, info["birthday"]["month"], info["birthday"]["day"])
+        if today > next_birthday:
+            next_birthday = datetime.datetime(today.year + 1, info["birthday"]["month"], info["birthday"]["day"])
+        
+        days_until_birthday = (next_birthday - today).days
+        
+        response = f"""
+**Thông tin về {info['name']}:** 🎯
 
-# Phân tích ảnh
-async def analyze_image(image_url, user_message):
+🎂 **Sinh nhật:** {info['birthday']['day']}/{info['birthday']['month']}/{info['year']}
+📅 **Tuổi hiện tại:** {age} tuổi
+🕒 **Sinh nhật tiếp theo:** Còn {days_until_birthday} ngày nữa
+💼 **Nghề nghiệp:** {info['job']}
+👤 **Username:** {username}
+
+"""
+        if days_until_birthday == 0:
+            response += "🎉 **Hôm nay là sinh nhật!** 🎉"
+        elif days_until_birthday < 30:
+            response += f"🎁 Sắp đến sinh nhật rồi, chuẩn bị quà đi nào! 🎊"
+        
+        await channel.send(response)
+    else:
+        await channel.send(f"❌ Không tìm thấy thông tin cho username: {username}")
+
+# Hàm phân tích ảnh
+async def analyze_image(image_url, message_type, user_message="", history_text="", server_context=""):
     try:
-        resp = requests.get(image_url)
-        img = Image.open(io.BytesIO(resp.content))
-        prompt = f"{personality}\nNgười dùng gửi ảnh và hỏi: '{user_message}'. Hãy phân tích và trả lời."
-        response = model.generate_content([prompt, img])
+        response = requests.get(image_url)
+        image_data = response.content
+        image = Image.open(io.BytesIO(image_data))
+        
+        question_type = check_question_type(user_message) if user_message else "normal"
+        
+        if message_type == "duc":
+            prompt_text = f"""
+{personality}
+
+{server_context}
+{history_text}
+
+Anh Đức gửi ảnh. {f"Anh ấy hỏi: '{user_message}'" if user_message else ""}
+
+TRẢ LỜI:
+1. Phân tích ảnh CHI TIẾT và TINH TẾ
+2. Xưng 'em' gọi 'anh' một cách tự nhiên
+3. Dùng emoji đa dạng phù hợp nội dung ảnh
+4. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "25-40 chữ" }
+
+Phân tích:
+"""
+        elif message_type == "brother":
+            prompt_text = f"""
+{personality}
+
+{server_context}
+{history_text}
+
+Anh ấy gửi ảnh. {f"Anh ấy hỏi: '{user_message}'" if user_message else ""}
+
+TRẢ LỜI:
+1. Phân tích ảnh CHI TIẾT
+2. Xưng 'em' gọi 'anh'
+3. Dùng emoji đa dạng phù hợp nội dung ảnh
+4. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "20-35 chữ" }
+
+Em trả lời:
+"""
+        else:
+            prompt_text = f"""
+{personality}
+
+{server_context}
+{history_text}
+
+Có người gửi ảnh. {f"Họ hỏi: '{user_message}'" if user_message else ""}
+
+TRẢ LỜI:
+1. Phân tích ảnh CHI TIẾT và TỬ TẾ
+2. Hạn chế xưng hô
+3. Dùng emoji đa dạng phù hợp nội dung ảnh
+4. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "20-35 chữ" }
+
+Trả lời:
+"""
+
+        response = model.generate_content([prompt_text, image])
         return response.text.strip()
-    except: return "Lỗi khi xem ảnh 😅"
-
-# --- HÀM TẠO ẢNH ---
-async def generate_image(prompt_text):
-    if not imagen_model:
-        return None
-    try:
-        # Gọi API tạo ảnh
-        result = imagen_model.generate_images(
-            prompt=prompt_text,
-            number_of_images=1,
-            aspect_ratio="1:1",
-            safety_filter_level="block_only_high"
-        )
-        if result and result.images:
-            img = result.images[0]
-            # Convert to byte array
-            img_byte_arr = io.BytesIO()
-            img.save(img_byte_arr, format='PNG')
-            img_byte_arr.seek(0)
-            return img_byte_arr
+        
     except Exception as e:
-        print(f"Lỗi tạo ảnh: {e}")
-    return None
+        return f"Lỗi phân tích ảnh 😅"
 
-# Setup Discord
+# Tạo Discord client
 intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
-intents.members = True 
 client = discord.Client(intents=intents)
 
 @client.event
 async def on_ready():
-    print(f'✅ Bot Online: {client.user}')
-    await client.change_presence(activity=discord.Game(name="!ve [mô tả]"))
+    print(f'✅ {client.user} đã kết nối Discord thành công!')
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫"))
+    
+    # Bắt đầu task kiểm tra sinh nhật mỗi ngày
     client.loop.create_task(birthday_check_loop())
 
+# Vòng lặp kiểm tra sinh nhật mỗi ngày
 async def birthday_check_loop():
     await client.wait_until_ready()
     while not client.is_closed():
-        await check_birthdays(client)
-        await asyncio.sleep(3600) # Check mỗi tiếng
+        try:
+            await check_birthdays(client)
+        except Exception as e:
+            print(f"❌ Lỗi khi kiểm tra sinh nhật: {e}")
+        # Chờ 24 giờ
+        await asyncio.sleep(24 * 60 * 60)
 
 @client.event
 async def on_message(message):
-    if message.author.bot: return
+    # Lưu tất cả tin nhắn vào server memory (chỉ đọc)
+    if message.content and not message.author.bot:
+        timestamp = datetime.datetime.now().strftime("%H:%M")
+        memory_msg = f"[{timestamp}] {message.author.display_name}: {message.content}"
+        add_to_server_memory(memory_msg)
 
-    # Save log
-    t = datetime.datetime.now().strftime("%H:%M")
-    add_to_server_memory(f"[{t}] {message.author.name}: {message.content}")
-
-    # Lệnh !ve
-    if message.content.lower().startswith('!ve '):
-        if not imagen_model:
-            await message.reply("⚠️ Tính năng vẽ tranh chưa khởi động được do lỗi server.")
-            return
-
-        prompt = message.content[4:].strip()
-        if not prompt:
-            await message.reply("🎨 Nhập mô tả đi ạ. Ví dụ: `!ve con mèo`")
-            return
-
-        async with message.channel.typing():
-            try:
-                # Dịch prompt sang tiếng Anh
-                trans_prompt = f"Translate this to detailed English prompt for image generation (under 40 words): '{prompt}'"
-                eng_prompt_resp = model.generate_content(trans_prompt)
-                eng_prompt = eng_prompt_resp.text.strip()
-                
-                # Tạo ảnh
-                img_data = await generate_image(eng_prompt)
-                if img_data:
-                    await message.reply(f"🎨 **{prompt}**", file=discord.File(img_data, 'art.png'))
-                else:
-                    await message.reply("😅 Không vẽ được, thử mô tả khác xem sao?")
-            except Exception as e:
-                await message.reply("Lỗi rồi: " + str(e))
+    if message.author == client.user:
         return
 
-    # Lệnh khác
+    # Bỏ qua @everyone và @here
+    if any(mention in [message.guild.default_role, "everyone", "here"] for mention in message.mentions):
+        return
+
+    # XỬ LÝ LỆNH TRỰC TIẾP - QUAN TRỌNG: XỬ LÝ TRƯỚC KHI KIỂM TRA TAG
     if message.content.startswith('!test_birthday'):
         parts = message.content.split()
-        if len(parts) == 2: await test_birthday(client, parts[1], message.channel)
+        if len(parts) == 2:
+            username = parts[1]
+            await test_birthday(client, username, message.channel)
+        else:
+            await message.channel.send("❌ Cú pháp: `!test_birthday username`")
         return
+
     if message.content.startswith('!member_info'):
         parts = message.content.split()
-        if len(parts) == 2: await show_member_info(parts[1], message.channel)
+        if len(parts) == 2:
+            username = parts[1]
+            await show_member_info(username, message.channel)
+        else:
+            await message.channel.send("❌ Cú pháp: `!member_info username`")
         return
 
-    # Chat
+    # XỬ LÝ CÂU HỎI VỀ THÔNG TIN THÀNH VIÊN KHI ĐƯỢC TAG
     if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
-        user_msg = message.content.replace(f'<@{client.user.id}>', '').strip()
+        user_message = message.content.replace(f'<@{client.user.id}>', '').strip().lower()
         
-        # Check hỏi thông tin user
-        for name, u_id in server_members.items():
-            if server_members[u_id]['name'].lower() in user_msg.lower() and ('sinh nhật' in user_msg or 'tuổi' in user_msg):
-                await show_member_info(u_id, message.channel)
+        # Kiểm tra các từ khóa về thông tin thành viên
+        member_keywords = ['sinh nhật', 'ngày sinh', 'birthday', 'tuổi', 'thông tin', 'info', 'nghề nghiệp', 'công việc']
+        member_names = {
+            'cường': 'demacianking1',
+            'thành': 'thanh0374', 
+            'dũng': 'dangialanrangu',
+            'dũng còi': 'dangialanrangu',
+            'ngọc': 'manted1229',
+            'ngọc điếc': 'manted1229',
+            'đức': 'vyanhduc',
+            'tuấn anh': 'pta.zyud',
+            'tuấn': 'pta.zyud'
+        }
+        
+        # Tìm tên thành viên được nhắc đến
+        found_member = None
+        for name, username in member_names.items():
+            if name in user_message:
+                found_member = username
+                break
+        
+        # Nếu tìm thấy thành viên và có từ khóa về thông tin
+        if found_member and any(keyword in user_message for keyword in member_keywords):
+            if found_member in server_members:
+                info = server_members[found_member]
+                today = datetime.datetime.now()
+                age = today.year - info['year']
+                next_birthday = datetime.datetime(today.year, info['birthday']['month'], info['birthday']['day'])
+                if today > next_birthday:
+                    next_birthday = datetime.datetime(today.year + 1, info['birthday']['month'], info['birthday']['day'])
+                
+                days_until_birthday = (next_birthday - today).days
+                
+                response = f"""
+**Thông tin về {info['name']}:** 🎯
+
+🎂 **Sinh nhật:** {info['birthday']['day']}/{info['birthday']['month']}/{info['year']}
+📅 **Tuổi hiện tại:** {age} tuổi
+🕒 **Sinh nhật tiếp theo:** Còn {days_until_birthday} ngày nữa
+💼 **Nghề nghiệp:** {info['job']}
+👤 **Username:** {found_member}
+
+"""
+                if days_until_birthday == 0:
+                    response += "🎉 **Hôm nay là sinh nhật!** 🎉"
+                elif days_until_birthday < 30:
+                    response += f"🎁 Sắp đến sinh nhật rồi, chuẩn bị quà đi nào! 🎊"
+                
+                await message.channel.send(response)
                 return
 
-        async with message.channel.typing():
-            # Xử lý ảnh gửi kèm
-            if message.attachments:
-                for att in message.attachments:
-                    if any(att.filename.lower().endswith(x) for x in ['.png','.jpg','.jpeg']):
-                        ans = await analyze_image(att.url, user_msg)
-                        await message.reply(ans)
-                        return
-            
-            # Chat text
-            hist = get_conversation_history(str(message.channel.id))
-            m_type = check_message_type(user_msg, message.author)
-            
-            prompt = f"{personality}\n{hist}\nUser ({m_type}): {user_msg}\nTrả lời:"
-            try:
-                resp = model.generate_content(prompt)
-                await message.reply(resp.text.strip())
-                add_to_history(str(message.channel.id), f"User: {user_msg}")
-                add_to_history(str(message.channel.id), f"Bot: {resp.text.strip()}")
-            except:
-                await message.reply("Đang suy nghĩ... thử lại sau nhé 🤯")
+    # Chỉ trả lời khi được tag hoặc DM (cho các tin nhắn thông thường)
+    if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
+        try:
+            async with message.channel.typing():
+                channel_id = str(message.channel.id)
+                user_message = message.content.replace(f'<@{client.user.id}>', '').strip()
+                
+                # Xác định loại câu hỏi để điều chỉnh độ dài
+                question_type = check_question_type(user_message)
+                
+                # Lấy lịch sử hội thoại và ngữ cảnh server
+                history_text = get_conversation_history(channel_id)
+                server_context = get_server_context()
+                
+                # Xử lý ảnh đính kèm
+                if message.attachments:
+                    for attachment in message.attachments:
+                        if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
+                            message_type = check_message_type(user_message, message.author)
+                            analysis = await analyze_image(attachment.url, message_type, user_message, history_text, server_context)
+                            
+                            await message.reply(analysis)
+                            
+                            # Lưu vào lịch sử kênh
+                            if user_message:
+                                add_to_history(channel_id, f"{message.author.display_name}: {user_message} (có ảnh)")
+                            add_to_history(channel_id, f"Yoo Ji Min: {analysis}")
+                            return
+                
+                # Xử lý tin nhắn chỉ có tag
+                if not user_message:
+                    message_type = check_message_type("", message.author)
+                    if message_type == "duc":
+                        response_text = "Dạ anh cần em giúp gì ạ? 🌟"
+                    elif message_type == "brother":
+                        response_text = "Dạ anh cần em giúp gì không ạ? 😊"
+                    else:
+                        response_text = "Mình có thể giúp gì cho bạn? 😊"
+                    
+                    await message.reply(response_text)
+                    add_to_history(channel_id, f"{message.author.display_name}: (tag)")
+                    add_to_history(channel_id, f"Yoo Ji Min: {response_text}")
+                    return
+                
+                message_type = check_message_type(user_message, message.author)
+                print(f"👤 {message.author.name}: {user_message} | Loại: {message_type} | Độ dài: {question_type}")
 
-# Web Server Keep-alive
+                # Prompt cho từng loại tin nhắn
+                if message_type == "duc":
+                    length_guide = {
+                        "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
+                        "short": "trả lời NGẮN GỌN (15-25 chữ)", 
+                        "normal": "trả lời VỪA PHẢI (25-40 chữ)"
+                    }
+                    
+                    prompt = f"""
+{personality}
+
+{server_context}
+{history_text}
+
+Anh Đức hỏi: "{user_message}"
+
+TRẢ LỜI:
+1. {length_guide[question_type]}
+2. Xưng 'em' gọi 'anh' một cách tự nhiên
+3. Dùng emoji ĐA DẠNG phù hợp chủ đề
+4. Lịch sự, tinh tế, đi thẳng vào vấn đề
+5. KHÔNG vòng vo, KHÔNG lan man
+
+Em trả lời:
+"""
+                elif message_type == "brother":
+                    length_guide = {
+                        "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
+                        "short": "trả lời NGẮN GỌN (15-25 chữ)",
+                        "normal": "trả lời VỪA PHẢI (20-35 chữ)"
+                    }
+                    
+                    prompt = f"""
+{personality}
+
+{server_context}
+{history_text}
+
+Anh ấy hỏi: "{user_message}"
+
+TRẢ LỜI:
+1. {length_guide[question_type]}
+2. Xưng 'em' gọi 'anh'
+3. Dùng emoji ĐA DẠNG phù hợp chủ đề
+4. Lịch sự, thẳng thắn, đi thẳng vào vấn đề
+5. KHÔNG vòng vo, KHÔNG lan man
+
+Em trả lời:
+"""
+                else:
+                    length_guide = {
+                        "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
+                        "short": "trả lời NGẮN GỌN (5-20 chữ)",
+                        "normal": "trả lời VỪA PHẢI (20-35 chữ)"
+                    }
+                    
+                    prompt = f"""
+{personality}
+
+{server_context}
+{history_text}
+
+Câu hỏi: "{user_message}"
+
+TRẢ LỜI:
+1. {length_guide[question_type]}
+2. Hạn chế xưng hô, nếu cần thì "mình"-"bạn"
+3. Dùng emoji ĐA DẠNG phù hợp chủ đề
+4. Lịch sự, thẳng thắn, đi thẳng vào vấn đề
+5. KHÔNG vòng vo, KHÔNG lan man
+
+Trả lời:
+"""
+
+                response = model.generate_content(prompt)
+                
+                if response.text:
+                    response_text = response.text.strip()
+                    
+                    # Giới hạn chữ linh hoạt theo loại câu hỏi
+                    words = response_text.split()
+                    if question_type == "long" and len(words) > 80:
+                        response_text = ' '.join(words[:80]) + "..."
+                    elif question_type == "short" and len(words) > 20:
+                        response_text = ' '.join(words[:20])
+                    elif question_type == "normal" and len(words) > 35:
+                        response_text = ' '.join(words[:35])
+                    
+                    await message.reply(response_text)
+                    print(f"🤖 Yoo Ji Min: {response_text}")
+                    
+                    # Lưu vào lịch sử kênh
+                    add_to_history(channel_id, f"{message.author.display_name}: {user_message}")
+                    add_to_history(channel_id, f"Yoo Ji Min: {response_text}")
+                else:
+                    error_msg = "Xin lỗi, mình chưa hiểu rõ câu hỏi. Bạn có thể hỏi lại được không? 🤔"
+                    await message.reply(error_msg)
+                    add_to_history(channel_id, f"{message.author.display_name}: {user_message}")
+                    add_to_history(channel_id, f"Yoo Ji Min: {error_msg}")
+                    
+        except Exception as e:
+            print(f"❌ Lỗi: {e}")
+            error_msg = "Có lỗi xảy ra, bạn thử lại nhé! 😅"
+            await message.reply(error_msg)
+
+# Tạo web server đơn giản
 app = flask.Flask(__name__)
-@app.route('/')
-def home(): return "Yoo Ji Min is Alive!"
-def run_web(): app.run(host='0.0.0.0', port=8080)
-def keep_alive(): t = threading.Thread(target=run_web); t.daemon = True; t.start()
 
+@app.route('/')
+def home():
+    return "🤖 Yoo Ji Min Bot is running!"
+
+@app.route('/health')
+def health():
+    return "OK"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = threading.Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+# Chạy bot
 if __name__ == "__main__":
     keep_alive()
-    client.run(DISCORD_TOKEN)
+    try:
+        client.run(DISCORD_TOKEN)
+    except Exception as e:
+        print(f"❌ Lỗi khởi chạy bot: {e}")
