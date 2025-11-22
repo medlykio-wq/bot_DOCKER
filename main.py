@@ -303,13 +303,26 @@ async def show_member_info(username, channel):
     else:
         await channel.send(f"❌ Không tìm thấy thông tin cho username: {username}")
 
-# Hàm tạo ảnh bằng Stable Diffusion
+# CÁC MODEL TẠO ẢNH DỰ PHÒNG
+MODELS = {
+    "stable-diffusion-v1-5": "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5",
+    "stable-diffusion-2-1": "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1",
+    "openjourney": "https://api-inference.huggingface.co/models/prompthero/openjourney",
+    "anything-v3": "https://api-inference.huggingface.co/models/Linaqruf/anything-v3.0"
+}
+
+# Hàm tạo ảnh
 async def generate_image(prompt, retry_count=3):
     """Tạo ảnh bằng Stable Diffusion API từ Hugging Face"""
     try:
-        API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
+        HF_TOKEN = os.getenv('HUGGINGFACE_TOKEN')
+        
+        if not HF_TOKEN:
+            print("❌ HUGGINGFACE_TOKEN không tồn tại!")
+            return None
+        
         headers = {
-            "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
+            "Authorization": f"Bearer {HF_TOKEN}",
             "Content-Type": "application/json"
         }
         
@@ -327,89 +340,90 @@ async def generate_image(prompt, retry_count=3):
             }
         }
         
-        async with aiohttp.ClientSession() as session:
-            for attempt in range(retry_count):
-                try:
-                    async with session.post(API_URL, headers=headers, json=payload, timeout=60) as response:
-                        
-                        if response.status == 200:
-                            image_data = await response.read()
-                            
-                            # Kiểm tra xem dữ liệu trả về có phải là ảnh không
-                            try:
-                                image = Image.open(io.BytesIO(image_data))
-                                return image_data
-                            except Exception:
-                                # Có thể API trả về JSON thông báo lỗi
-                                error_text = await response.text()
-                                print(f"❌ Lỗi tạo ảnh: {error_text}")
-                                
-                                if "model is loading" in error_text.lower():
-                                    wait_time = 30  # Chờ 30 giây nếu model đang load
-                                    print(f"⏳ Model đang loading, chờ {wait_time}s...")
-                                    await asyncio.sleep(wait_time)
-                                    continue
-                                else:
-                                    return None
-                        
-                        elif response.status == 503:
-                            # Model đang loading, chờ và thử lại
-                            wait_time = min(60, (attempt + 1) * 20)  # Tăng dần thời gian chờ
-                            print(f"⏳ Model đang loading, chờ {wait_time}s...")
-                            await asyncio.sleep(wait_time)
-                            continue
-                        
-                        else:
-                            error_text = await response.text()
-                            print(f"❌ Lỗi API: {response.status} - {error_text}")
-                            return None
-                            
-                except asyncio.TimeoutError:
-                    print(f"⏰ Timeout lần {attempt + 1}, thử lại...")
-                    if attempt < retry_count - 1:
-                        await asyncio.sleep(10)
-                    continue
-                except Exception as e:
-                    print(f"❌ Lỗi kết nối: {e}")
-                    if attempt < retry_count - 1:
-                        await asyncio.sleep(10)
-                    continue
+        # THỬ CÁC MODEL KHÁC NHAU
+        models_to_try = ["stable-diffusion-v1-5", "stable-diffusion-2-1", "openjourney"]
         
+        for model_name in models_to_try:
+            API_URL = MODELS[model_name]
+            print(f"🔄 Thử model: {model_name}")
+            
+            async with aiohttp.ClientSession() as session:
+                for attempt in range(retry_count):
+                    try:
+                        async with session.post(API_URL, headers=headers, json=payload, timeout=120) as response:
+                            print(f"📡 {model_name} - Status: {response.status}")
+                            
+                            if response.status == 200:
+                                image_data = await response.read()
+                                print(f"✅ Thành công với model: {model_name}")
+                                
+                                try:
+                                    image = Image.open(io.BytesIO(image_data))
+                                    return image_data
+                                except Exception as img_error:
+                                    print(f"❌ Lỗi ảnh từ {model_name}: {img_error}")
+                                    continue
+                            
+                            elif response.status == 503:
+                                print(f"⏳ {model_name} đang loading...")
+                                await asyncio.sleep(30)
+                                continue
+                                
+                            else:
+                                error_text = await response.text()
+                                print(f"❌ {model_name} lỗi: {response.status}")
+                                break
+                                
+                    except asyncio.TimeoutError:
+                        print(f"⏰ {model_name} timeout")
+                        continue
+                    except Exception as e:
+                        print(f"❌ {model_name} lỗi kết nối: {e}")
+                        continue
+            
+            print(f"⚠️ Chuyển sang model tiếp theo...")
+            await asyncio.sleep(5)
+        
+        print("❌ Tất cả model đều thất bại")
         return None
         
     except Exception as e:
-        print(f"❌ Lỗi tạo ảnh: {e}")
+        print(f"❌ Lỗi tổng thể: {e}")
         return None
 
-# Hàm xử lý lệnh tạo ảnh
+# Hàm xử lý tạo ảnh
 async def handle_image_generation(message, prompt):
     """Xử lý lệnh tạo ảnh"""
-    if not HUGGINGFACE_TOKEN:
-        await message.channel.send("❌ Chưa cấu hình token tạo ảnh. Liên hệ admin để setup!")
+    HF_TOKEN = os.getenv('HUGGINGFACE_TOKEN')
+    
+    if not HF_TOKEN:
+        await message.channel.send("❌ **Lỗi cấu hình:** Chưa cấu hình Hugging Face Token!\nHãy liên hệ admin để thêm `HUGGINGFACE_TOKEN` vào environment variables.")
         return
     
     if not prompt:
-        await message.channel.send("❌ Vui lòng cung cấp prompt để tạo ảnh!\nVí dụ: `@Yoo Ji Min tạo ảnh một chú mèo dễ thương`")
+        await message.channel.send("❌ **Thiếu prompt:** Vui lòng cung cấp mô tả để tạo ảnh!\nVí dụ: `@Yoo Ji Min tạo ảnh một chú mèo dễ thương`")
         return
     
     # Thông báo đang xử lý
-    processing_msg = await message.channel.send(f"🖌️ Đang tạo ảnh với prompt: *{prompt}*...\n⏳ Có thể mất 30-60 giây...")
+    processing_msg = await message.channel.send(f"🎨 **Đang tạo ảnh...**\n📝 Prompt: *{prompt}*\n⏳ Có thể mất 1-2 phút...")
     
     try:
+        print(f"🚀 Bắt đầu tạo ảnh với prompt: {prompt}")
+        
         # Gọi hàm tạo ảnh
         image_data = await generate_image(prompt)
         
         if image_data:
             # Tạo file ảnh và gửi
             with io.BytesIO(image_data) as image_file:
-                # Đặt tên file
                 filename = f"generated_{int(time.time())}.png"
                 
-                # Tạo embed đẹp
+                # Tạo embed
                 embed = discord.Embed(
-                    title="🎨 Ảnh đã được tạo!",
+                    title="🎨 Ảnh Đã Được Tạo!",
                     description=f"**Prompt:** {prompt}",
-                    color=0x00ff00
+                    color=0x00ff00,
+                    timestamp=datetime.datetime.now()
                 )
                 embed.set_footer(text="Tạo bởi Yoo Ji Min • Stable Diffusion")
                 
@@ -420,12 +434,23 @@ async def handle_image_generation(message, prompt):
                 await processing_msg.delete()
                 await message.channel.send(embed=embed, file=file)
                 
-                print(f"✅ Đã tạo ảnh với prompt: {prompt}")
+                print(f"✅ Đã tạo và gửi ảnh thành công!")
         else:
-            await processing_msg.edit(content="❌ Không thể tạo ảnh. Có thể:\n• Prompt không phù hợp\n• API đang bận\n• Token không hợp lệ\n\nVui lòng thử lại sau!")
+            error_msg = """
+❌ **Không thể tạo ảnh.** Có thể do:
+
+• 🤖 **Model đang bận** - Thử lại sau 1-2 phút
+• 🔑 **Token không hợp lệ** - Kiểm tra Hugging Face Token
+• 📝 **Prompt không phù hợp** - Thử prompt đơn giản hơn
+• 🌐 **Lỗi kết nối** - Kiểm tra internet
+
+**💡 Mẹo:** Thử prompt tiếng Anh đơn giản như "a cute cat" hoặc "beautiful landscape"
+"""
+            await processing_msg.edit(content=error_msg)
             
     except Exception as e:
-        await processing_msg.edit(content=f"❌ Lỗi khi tạo ảnh: {str(e)}")
+        error_msg = f"❌ **Lỗi hệ thống:** {str(e)}\nVui lòng thử lại sau!"
+        await processing_msg.edit(content=error_msg)
         print(f"❌ Lỗi xử lý tạo ảnh: {e}")
 
 # Hàm phân tích ảnh
@@ -504,7 +529,7 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
-    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫"))
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫💫💫"))
     
     # Bắt đầu task kiểm tra sinh nhật mỗi ngày
     client.loop.create_task(birthday_check_loop())
@@ -535,7 +560,7 @@ async def on_message(message):
     if any(mention in [message.guild.default_role, "everyone", "here"] for mention in message.mentions):
         return
 
-    # XỬ LÝ LỆNH TRỰC TIẾP
+    # XỬ LÝ LỆNH TRỰC TIẾP - QUAN TRỌNG: XỬ LÝ TRƯỚC KHI KIỂM TRA TAG
     if message.content.startswith('!test_birthday'):
         parts = message.content.split()
         if len(parts) == 2:
