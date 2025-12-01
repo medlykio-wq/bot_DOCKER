@@ -32,11 +32,11 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# Lưu trữ lịch sử hội thoại theo channel_id
-conversation_history = defaultdict(lambda: deque(maxlen=200))
+# Lưu trữ lịch sử hội thoại theo channel_id - GIẢM XUỐNG 50 TIN
+conversation_history = defaultdict(lambda: deque(maxlen=50))
 
 # Lưu trữ tất cả tin nhắn trong server để học hỏi (chỉ đọc)
-server_memory = deque(maxlen=500)
+server_memory = deque(maxlen=200)
 
 # Thông tin thành viên server
 server_members = {
@@ -91,12 +91,12 @@ Bạn là Yoo Ji Min, một thành viên thông minh và hữu ích trong server
 TÍNH CÁCH:
 - LỊCH SỰ, THẲNG THẲN nhưng TỬ TẾ
 - Trả lời phù hợp với từng loại câu hỏi:
-  + Câu hỏi đơn giản: trả lời ngắn gọn (5-35 chữ)
+  + Câu hỏi đơn giản: trả lời ngắn gọn (5-30 chữ)
   + Câu hỏi phức tạp, lý thuyết, thông tin chi tiết: có thể trả lời dài (đến 80 chữ)
 - Luôn đi thẳng vào vấn đề, không vòng vo
 - Dùng emoji ĐA DẠNG và PHÙ HỢP với nội dung
 - Nếu người khác xưng "anh" thì xưng "em" lại
-- Với Đức (vyanhduc): luôn ngọt ngào, tinh tế, xưng em gọi anh
+- Với Đức (vyanhduc): luôn ngọt ngào, tinh tế, xưng em gọi anh nhưng KHÔNG dùng câu mở đầu
 - Hạn chế xưng hô, nếu cần thì xưng "mình" - "bạn"
 
 EMOJI THEO CHỦ ĐỀ:
@@ -106,7 +106,7 @@ EMOJI THEO CHỦ ĐỀ:
 LUÔN DÙNG EMOJI PHÙ HỢP VÀ EMOJI KHÔNG TÍNH VÀO GIỚI HẠN CHỮ!
 """
 
-# Hàm tạo ảnh bằng Pollinations AI
+# Hàm tạo ảnh bằng Pollinations AI - CHỈ DÙNG CHO SINH NHẬT
 async def generate_birthday_image(name, age, job):
     """Tạo ảnh chúc mừng sinh nhật bằng Pollinations AI"""
     try:
@@ -187,7 +187,7 @@ def get_conversation_history(channel_id):
         return ""
     
     history_text = "Cuộc trò chuyện gần đây:\n"
-    for msg in list(history)[-20:]:
+    for msg in list(history)[-15:]:  # Chỉ hiển thị 15 tin nhắn gần nhất
         history_text += f"{msg}\n"
     return history_text + "\n"
 
@@ -196,7 +196,7 @@ def get_server_context():
     if not server_memory:
         return ""
     
-    recent_messages = list(server_memory)[-50:]
+    recent_messages = list(server_memory)[-30:]  # Giảm xuống 30 tin
     
     context = "Thông tin về hoạt động server gần đây:\n"
     for msg in recent_messages:
@@ -273,7 +273,7 @@ Lời chúc của em:
                     # Đánh dấu đã chúc mừng trong ngày
                     info["last_birthday_wish"] = today.strftime("%Y-%m-%d")
 
-# Hàm test sinh nhật
+# Hàm test sinh nhật - VẪN GIỮ ẢNH
 async def test_birthday(client, username, channel):
     """Hàm test chúc mừng sinh nhật (dùng cho testing)"""
     if username in server_members:
@@ -365,7 +365,7 @@ async def show_member_info(username, channel):
     else:
         await channel.send(f"❌ Không tìm thấy thông tin cho username: {username}")
 
-# Hàm phân tích ảnh
+# Hàm phân tích ảnh - ĐÃ SỬA CHO ĐỨC
 async def analyze_image(image_url, message_type, user_message="", history_text="", server_context=""):
     try:
         response = requests.get(image_url)
@@ -386,8 +386,10 @@ Anh Đức gửi ảnh. {f"Anh ấy hỏi: '{user_message}'" if user_message els
 TRẢ LỜI:
 1. Phân tích ảnh CHI TIẾT và TINH TẾ
 2. Xưng 'em' gọi 'anh' một cách tự nhiên
-3. Dùng emoji đa dạng phù hợp nội dung ảnh
-4. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "20-35 chữ" }
+3. KHÔNG dùng câu mở đầu như "anh Đức ơi"
+4. Đi thẳng vào nội dung phân tích
+5. Dùng emoji đa dạng phù hợp nội dung ảnh
+6. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "20-30 chữ" }
 
 Phân tích:
 """
@@ -404,7 +406,7 @@ TRẢ LỜI:
 1. Phân tích ảnh CHI TIẾT
 2. Xưng 'em' gọi 'anh'
 3. Dùng emoji đa dạng phù hợp nội dung ảnh
-4. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "15-30 chữ" }
+4. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "15-25 chữ" }
 
 Em trả lời:
 """
@@ -421,7 +423,7 @@ TRẢ LỜI:
 1. Phân tích ảnh CHI TIẾT và TỬ TẾ
 2. Hạn chế xưng hô
 3. Dùng emoji đa dạng phù hợp nội dung ảnh
-4. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "15-30 chữ" }
+4. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "15-25 chữ" }
 
 Trả lời:
 """
@@ -489,63 +491,6 @@ async def on_message(message):
             await show_member_info(username, message.channel)
         else:
             await message.channel.send("❌ Cú pháp: `!member_info username`")
-        return
-
-    # XỬ LÝ LỆNH TẠO ẢNH
-    if message.content.startswith('!create_image'):
-        parts = message.content.split(' ', 1)
-        if len(parts) == 2:
-            prompt = parts[1]
-            await message.channel.send("🔄 Đang tạo ảnh...")
-            
-            try:
-                # Tạo ảnh từ prompt
-                encoded_prompt = urllib.parse.quote(prompt)
-                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as response:
-                        if response.status == 200:
-                            image_data = await response.read()
-                            image_file = discord.File(io.BytesIO(image_data), filename="created_image.png")
-                            await message.channel.send(
-                                f"🎨 **Ảnh đã được tạo!**\n**Prompt:** {prompt}",
-                                file=image_file
-                            )
-                            print(f"✅ Đã tạo ảnh với prompt: {prompt}")
-                        else:
-                            await message.channel.send("❌ Lỗi khi tạo ảnh, thử lại nhé!")
-            except Exception as e:
-                await message.channel.send("❌ Có lỗi xảy ra khi tạo ảnh!")
-                print(f"❌ Lỗi tạo ảnh: {e}")
-        else:
-            await message.channel.send("❌ Cú pháp: `!create_image [mô tả ảnh bạn muốn]`")
-        return
-
-    # XỬ LÝ LỆNH TẠO ẢNH SINH NHẬT
-    if message.content.startswith('!birthday_image'):
-        parts = message.content.split()
-        if len(parts) >= 2:
-            username = parts[1]
-            if username in server_members:
-                info = server_members[username]
-                age = datetime.datetime.now().year - info["year"]
-                
-                await message.channel.send("🎂 Đang tạo ảnh sinh nhật...")
-                
-                image_data = await generate_birthday_image(info['name'], age, info['job'])
-                if image_data:
-                    image_file = discord.File(io.BytesIO(image_data), filename=f"birthday_{info['name']}.png")
-                    await message.channel.send(
-                        f"🎉 **Ảnh sinh nhật cho {info['name']}!**\nTuổi: {age} | Nghề: {info['job']}",
-                        file=image_file
-                    )
-                else:
-                    await message.channel.send("❌ Không thể tạo ảnh sinh nhật")
-            else:
-                await message.channel.send("❌ Không tìm thấy thông tin thành viên")
-        else:
-            await message.channel.send("❌ Cú pháp: `!birthday_image [username]`")
         return
 
     # XỬ LÝ CÂU HỎI VỀ THÔNG TIN THÀNH VIÊN KHI ĐƯỢC TAG
@@ -650,12 +595,12 @@ async def on_message(message):
                 message_type = check_message_type(user_message, message.author)
                 print(f"👤 {message.author.name}: {user_message} | Loại: {message_type} | Độ dài: {question_type}")
 
-                # Prompt cho từng loại tin nhắn - ĐÃ CẬP NHẬT CHO ĐỨC
+                # Prompt cho từng loại tin nhắn - ĐÃ SỬA CHO ĐỨC
                 if message_type == "duc":
                     length_guide = {
                         "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
                         "short": "trả lời NGẮN GỌN (10-20 chữ)",
-                        "normal": "trả lời VỪA PHẢI (20-35 chữ)"
+                        "normal": "trả lời VỪA PHẢI (20-30 chữ)"
                     }
                     
                     prompt = f"""
@@ -676,18 +621,13 @@ TRẢ LỜI:
 7. Lịch sự, tinh tế, đi thẳng vào vấn đề
 8. KHÔNG vòng vo, KHÔNG lan man
 
-Ví dụ cách trả lời:
-- ❌ "Anh Đức ơi, em nghĩ là..." → KHÔNG
-- ✅ "Dạ theo em thì..." → TỐT
-- ✅ "Em thấy rằng..." → TỐT
-
 Em trả lời:
 """
                 elif message_type == "brother":
                     length_guide = {
                         "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
                         "short": "trả lời NGẮN GỌN (10-20 chữ)",
-                        "normal": "trả lời VỪA PHẢI (15-30 chữ)"
+                        "normal": "trả lời VỪA PHẢI (15-25 chữ)"
                     }
                     
                     prompt = f"""
@@ -711,7 +651,7 @@ Em trả lời:
                     length_guide = {
                         "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
                         "short": "trả lời NGẮN GỌN (5-15 chữ)",
-                        "normal": "trả lời VỪA PHẢI (15-30 chữ)"
+                        "normal": "trả lời VỪA PHẢI (15-25 chữ)"
                     }
                     
                     prompt = f"""
@@ -741,10 +681,10 @@ Trả lời:
                     words = response_text.split()
                     if question_type == "long" and len(words) > 80:
                         response_text = ' '.join(words[:80]) + "..."
-                    elif question_type == "short" and len(words) > 15:  # Giảm 5 chữ
+                    elif question_type == "short" and len(words) > 15:
                         response_text = ' '.join(words[:15])
-                    elif question_type == "normal" and len(words) > 30:  # Giảm 5 chữ
-                        response_text = ' '.join(words[:30])
+                    elif question_type == "normal" and len(words) > 25:
+                        response_text = ' '.join(words[:25])
                     
                     await message.reply(response_text)
                     print(f"🤖 Yoo Ji Min: {response_text}")
