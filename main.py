@@ -32,13 +32,13 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# Lưu trữ lịch sử hội thoại theo channel_id - GIẢM XUỐNG 50 TIN
-conversation_history = defaultdict(lambda: deque(maxlen=50))
+# Lưu trữ lịch sử hội thoại theo channel_id - TĂNG LÊN 200 TIN NHẮN
+conversation_history = defaultdict(lambda: deque(maxlen=200))
 
 # Lưu trữ tất cả tin nhắn trong server để học hỏi (chỉ đọc)
-server_memory = deque(maxlen=200)
+server_memory = deque(maxlen=500)
 
-# Thông tin thành viên server
+# Thông tin thành viên server - ĐÃ CẬP NHẬT THÔNG TIN DŨNG
 server_members = {
     "demacianking1": {
         "name": "Cường",
@@ -59,6 +59,7 @@ server_members = {
         "birthday": {"day": 17, "month": 11},
         "year": 2000,
         "job": "kiến trúc sư",
+        "girlfriend": "Lục Ngọc Hà",  # THÊM THÔNG TIN MỚI
         "last_birthday_wish": None
     },
     "manted1229": {
@@ -84,19 +85,19 @@ server_members = {
     }
 }
 
-# Tính cách Yoo Ji Min
+# Tính cách Yoo Ji Min - ĐÃ CẬP NHẬT
 personality = """
 Bạn là Yoo Ji Min, một thành viên thông minh và hữu ích trong server Discord này.
 
 TÍNH CÁCH:
 - LỊCH SỰ, THẲNG THẲN nhưng TỬ TẾ
 - Trả lời phù hợp với từng loại câu hỏi:
-  + Câu hỏi đơn giản: trả lời ngắn gọn (5-30 chữ)
+  + Câu hỏi đơn giản: trả lời ngắn gọn (5-35 chữ)
   + Câu hỏi phức tạp, lý thuyết, thông tin chi tiết: có thể trả lời dài (đến 80 chữ)
 - Luôn đi thẳng vào vấn đề, không vòng vo
 - Dùng emoji ĐA DẠNG và PHÙ HỢP với nội dung
 - Nếu người khác xưng "anh" thì xưng "em" lại
-- Với Đức (vyanhduc): luôn ngọt ngào, tinh tế, xưng em gọi anh nhưng KHÔNG dùng câu mở đầu
+- Với Đức (vyanhduc): luôn ngọt ngào, tinh tế, xưng em gọi anh
 - Hạn chế xưng hô, nếu cần thì xưng "mình" - "bạn"
 
 EMOJI THEO CHỦ ĐỀ:
@@ -106,7 +107,7 @@ EMOJI THEO CHỦ ĐỀ:
 LUÔN DÙNG EMOJI PHÙ HỢP VÀ EMOJI KHÔNG TÍNH VÀO GIỚI HẠN CHỮ!
 """
 
-# Hàm tạo ảnh bằng Pollinations AI - CHỈ DÙNG CHO SINH NHẬT
+# Hàm tạo ảnh sinh nhật bằng Pollinations AI - CHỈ DÙNG CHO SINH NHẬT
 async def generate_birthday_image(name, age, job):
     """Tạo ảnh chúc mừng sinh nhật bằng Pollinations AI"""
     try:
@@ -187,7 +188,7 @@ def get_conversation_history(channel_id):
         return ""
     
     history_text = "Cuộc trò chuyện gần đây:\n"
-    for msg in list(history)[-15:]:  # Chỉ hiển thị 15 tin nhắn gần nhất
+    for msg in list(history)[-30:]:  # Hiển thị 30 tin nhắn gần nhất
         history_text += f"{msg}\n"
     return history_text + "\n"
 
@@ -196,7 +197,7 @@ def get_server_context():
     if not server_memory:
         return ""
     
-    recent_messages = list(server_memory)[-30:]  # Giảm xuống 30 tin
+    recent_messages = list(server_memory)[-50:]
     
     context = "Thông tin về hoạt động server gần đây:\n"
     for msg in recent_messages:
@@ -273,7 +274,7 @@ Lời chúc của em:
                     # Đánh dấu đã chúc mừng trong ngày
                     info["last_birthday_wish"] = today.strftime("%Y-%m-%d")
 
-# Hàm test sinh nhật - VẪN GIỮ ẢNH
+# Hàm test sinh nhật
 async def test_birthday(client, username, channel):
     """Hàm test chúc mừng sinh nhật (dùng cho testing)"""
     if username in server_members:
@@ -353,9 +354,13 @@ async def show_member_info(username, channel):
 📅 **Tuổi hiện tại:** {age} tuổi
 🕒 **Sinh nhật tiếp theo:** Còn {days_until_birthday} ngày nữa
 💼 **Nghề nghiệp:** {info['job']}
-👤 **Username:** {username}
-
 """
+        # Thêm thông tin bạn gái nếu có
+        if 'girlfriend' in info:
+            response += f"💕 **Bạn gái:** {info['girlfriend']}\n"
+        
+        response += f"👤 **Username:** {username}\n\n"
+        
         if days_until_birthday == 0:
             response += "🎉 **Hôm nay là sinh nhật!** 🎉"
         elif days_until_birthday < 30:
@@ -365,7 +370,7 @@ async def show_member_info(username, channel):
     else:
         await channel.send(f"❌ Không tìm thấy thông tin cho username: {username}")
 
-# Hàm phân tích ảnh - ĐÃ SỬA CHO ĐỨC
+# Hàm phân tích ảnh - ĐÃ SỬA BỎ "ANH ĐỨC ƠI"
 async def analyze_image(image_url, message_type, user_message="", history_text="", server_context=""):
     try:
         response = requests.get(image_url)
@@ -386,8 +391,8 @@ Anh Đức gửi ảnh. {f"Anh ấy hỏi: '{user_message}'" if user_message els
 TRẢ LỜI:
 1. Phân tích ảnh CHI TIẾT và TINH TẾ
 2. Xưng 'em' gọi 'anh' một cách tự nhiên
-3. KHÔNG dùng câu mở đầu như "anh Đức ơi"
-4. Đi thẳng vào nội dung phân tích
+3. KHÔNG dùng câu mở đầu như "anh Đức ơi", "thưa anh Đức",...
+4. Đi thẳng vào phân tích ảnh
 5. Dùng emoji đa dạng phù hợp nội dung ảnh
 6. Độ dài: { "có thể đến 80 chữ" if question_type == "long" else "20-30 chữ" }
 
@@ -443,7 +448,7 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
-    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫"))
+    await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫💫💫"))
     
     # Bắt đầu task kiểm tra sinh nhật mỗi ngày
     client.loop.create_task(birthday_check_loop())
@@ -498,7 +503,7 @@ async def on_message(message):
         user_message = message.content.replace(f'<@{client.user.id}>', '').strip().lower()
         
         # Kiểm tra các từ khóa về thông tin thành viên
-        member_keywords = ['sinh nhật', 'ngày sinh', 'birthday', 'tuổi', 'thông tin', 'info', 'nghề nghiệp', 'công việc']
+        member_keywords = ['sinh nhật', 'ngày sinh', 'birthday', 'tuổi', 'thông tin', 'info', 'nghề nghiệp', 'công việc', 'bạn gái']
         member_names = {
             'cường': 'demacianking1',
             'thành': 'thanh0374', 
@@ -521,31 +526,7 @@ async def on_message(message):
         # Nếu tìm thấy thành viên và có từ khóa về thông tin
         if found_member and any(keyword in user_message for keyword in member_keywords):
             if found_member in server_members:
-                info = server_members[found_member]
-                today = datetime.datetime.now()
-                age = today.year - info['year']
-                next_birthday = datetime.datetime(today.year, info['birthday']['month'], info['birthday']['day'])
-                if today > next_birthday:
-                    next_birthday = datetime.datetime(today.year + 1, info['birthday']['month'], info['birthday']['day'])
-                
-                days_until_birthday = (next_birthday - today).days
-                
-                response = f"""
-**Thông tin về {info['name']}:** 🎯
-
-🎂 **Sinh nhật:** {info['birthday']['day']}/{info['birthday']['month']}/{info['year']}
-📅 **Tuổi hiện tại:** {age} tuổi
-🕒 **Sinh nhật tiếp theo:** Còn {days_until_birthday} ngày nữa
-💼 **Nghề nghiệp:** {info['job']}
-👤 **Username:** {found_member}
-
-"""
-                if days_until_birthday == 0:
-                    response += "🎉 **Hôm nay là sinh nhật!** 🎉"
-                elif days_until_birthday < 30:
-                    response += f"🎁 Sắp đến sinh nhật rồi, chuẩn bị quà đi nào! 🎊"
-                
-                await message.channel.send(response)
+                await show_member_info(found_member, message.channel)
                 return
 
     # Chỉ trả lời khi được tag hoặc DM (cho các tin nhắn thông thường)
@@ -595,12 +576,12 @@ async def on_message(message):
                 message_type = check_message_type(user_message, message.author)
                 print(f"👤 {message.author.name}: {user_message} | Loại: {message_type} | Độ dài: {question_type}")
 
-                # Prompt cho từng loại tin nhắn - ĐÃ SỬA CHO ĐỨC
+                # Prompt cho từng loại tin nhắn
                 if message_type == "duc":
                     length_guide = {
                         "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
                         "short": "trả lời NGẮN GỌN (10-20 chữ)",
-                        "normal": "trả lời VỪA PHẢI (20-30 chữ)"
+                        "normal": "trả lời VỪA PHẢI (20-35 chữ)"
                     }
                     
                     prompt = f"""
@@ -621,13 +602,18 @@ TRẢ LỜI:
 7. Lịch sự, tinh tế, đi thẳng vào vấn đề
 8. KHÔNG vòng vo, KHÔNG lan man
 
+Ví dụ cách trả lời:
+- ❌ "Anh Đức ơi, em nghĩ là..." → KHÔNG
+- ✅ "Dạ theo em thì..." → TỐT
+- ✅ "Em thấy rằng..." → TỐT
+
 Em trả lời:
 """
                 elif message_type == "brother":
                     length_guide = {
                         "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
-                        "short": "trả lời NGẮN GỌN (10-20 chữ)",
-                        "normal": "trả lời VỪA PHẢI (15-25 chữ)"
+                        "short": "trả lời NGẮN GỌN (15-25 chữ)",
+                        "normal": "trả lời VỪA PHẢI (20-35 chữ)"
                     }
                     
                     prompt = f"""
@@ -650,8 +636,8 @@ Em trả lời:
                 else:
                     length_guide = {
                         "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
-                        "short": "trả lời NGẮN GỌN (5-15 chữ)",
-                        "normal": "trả lời VỪA PHẢI (15-25 chữ)"
+                        "short": "trả lời NGẮN GỌN (5-20 chữ)",
+                        "normal": "trả lời VỪA PHẢI (20-35 chữ)"
                     }
                     
                     prompt = f"""
@@ -677,14 +663,14 @@ Trả lời:
                 if response.text:
                     response_text = response.text.strip()
                     
-                    # Giới hạn chữ linh hoạt theo loại câu hỏi - ĐÃ GIẢM 5 CHỮ
+                    # Giới hạn chữ linh hoạt theo loại câu hỏi
                     words = response_text.split()
                     if question_type == "long" and len(words) > 80:
                         response_text = ' '.join(words[:80]) + "..."
                     elif question_type == "short" and len(words) > 15:
                         response_text = ' '.join(words[:15])
-                    elif question_type == "normal" and len(words) > 25:
-                        response_text = ' '.join(words[:25])
+                    elif question_type == "normal" and len(words) > 30:
+                        response_text = ' '.join(words[:30])
                     
                     await message.reply(response_text)
                     print(f"🤖 Yoo Ji Min: {response_text}")
