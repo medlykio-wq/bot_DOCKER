@@ -30,7 +30,7 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 
 # Cấu hình Gemini
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-3.0-pro-preview')
 
 # Lưu trữ lịch sử hội thoại theo channel_id - GIẢM XUỐNG 50 TIN
 conversation_history = defaultdict(lambda: deque(maxlen=50))
