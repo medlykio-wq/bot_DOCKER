@@ -8,6 +8,9 @@ import threading
 from collections import defaultdict, deque
 import datetime
 import time
+import requests
+import base64
+import json
 
 # ================= CẤU HÌNH =================
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -17,10 +20,10 @@ if not DISCORD_TOKEN or not GEMINI_API_KEY:
     print("❌ Lỗi: Thiếu Token!")
     exit(1)
 
-print("🔄 Đang khởi động Yoo Ji Min (Chế độ Nano Banana 3 - Hardcore)...")
+print("🔄 Đang khởi động Yoo Ji Min (Chế độ Nano Banana 3 - API Direct)...")
 
+# Cấu hình Chat
 genai.configure(api_key=GEMINI_API_KEY)
-# Model chat xử lý text
 TEXT_MODEL_NAME = 'gemini-1.5-flash'
 text_model = genai.GenerativeModel(TEXT_MODEL_NAME)
 
@@ -45,14 +48,14 @@ Bạn là Yoo Ji Min, một AI thông minh và tinh nghịch.
 - Với người khác: Xưng hô linh hoạt, vui vẻ.
 """
 
-# ================= HÀM XỬ LÝ ẢNH (CHỈ DÙNG GEMINI IMAGEN 3) =================
+# ================= HÀM XỬ LÝ ẢNH (GỌI API TRỰC TIẾP) =================
 
 async def generate_image_core(prompt):
     print(f"🎨 Yêu cầu vẽ (Nano Banana 3): {prompt}")
     
     final_prompt = prompt
     
-    # BƯỚC 1: Dịch prompt sang tiếng Anh bằng Gemini Flash để tối ưu hóa đầu vào cho Imagen 3
+    # BƯỚC 1: Dịch prompt sang tiếng Anh (Bắt buộc để Imagen hiểu tốt nhất)
     try:
         trans_prompt = f"Translate this prompt to English for image generation, keep it detailed: {prompt}"
         trans_response = await text_model.generate_content_async(trans_prompt)
@@ -60,48 +63,57 @@ async def generate_image_core(prompt):
         print(f"✅ Đã dịch prompt: {final_prompt}")
     except Exception as e:
         print(f"⚠️ Lỗi dịch thuật: {e}")
-        pass # Dùng tạm prompt tiếng Việt
+        pass
 
-    # BƯỚC 2: Gọi trực tiếp model IMAGEN 3 (Nano Banana) của Google
+    # BƯỚC 2: Gọi API Imagen 3 qua HTTP Request (Bỏ qua thư viện lỗi)
     try:
-        # Chạy trong thread riêng vì thư viện genai có thể chặn luồng chính
-        def run_imagen():
-            # Thử gọi model Imagen 3 mới nhất
-            # Lưu ý: Nếu Key chưa được cấp quyền Imagen 3, nó sẽ lỗi ở đây.
-            imagen_model = genai.ImageGenerationModel("imagen-3.0-generate-001")
-            result = imagen_model.generate_images(
-                prompt=final_prompt,
-                number_of_images=1,
-                aspect_ratio="1:1",
-                safety_filter="block_only_high",
-            )
-            return result
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key={GEMINI_API_KEY}"
+        headers = {'Content-Type': 'application/json'}
+        payload = {
+            "instances": [
+                {
+                    "prompt": final_prompt
+                }
+            ],
+            "parameters": {
+                "sampleCount": 1,
+                "aspectRatio": "1:1" # Có thể đổi thành "16:9" hoặc "9:16"
+            }
+        }
 
-        # Chạy hàm blocking trong executor để không lag bot Discord
-        result = await asyncio.to_thread(run_imagen)
+        # Hàm gọi request chặn (blocking) cần chạy trong thread khác
+        def call_api():
+            return requests.post(url, headers=headers, json=payload)
+
+        response = await asyncio.to_thread(call_api)
         
-        # Lấy ảnh về
-        if result and result.images:
-            image_bytes = result.images[0].image_bytes
-            return image_bytes, final_prompt
+        if response.status_code == 200:
+            result = response.json()
+            # Lấy dữ liệu ảnh Base64
+            if 'predictions' in result and len(result['predictions']) > 0:
+                b64_data = result['predictions'][0]['bytesBase64Encoded']
+                image_bytes = base64.b64decode(b64_data)
+                return image_bytes, final_prompt
+            else:
+                return None, "Google API trả về 200 OK nhưng không có dữ liệu ảnh (Có thể do bộ lọc an toàn)."
         else:
-            return None, "Google không trả về ảnh nào."
+            # Xử lý các mã lỗi cụ thể
+            error_msg = response.text
+            if response.status_code == 404:
+                return None, "Model 'Imagen 3' chưa khả dụng với API Key này (Google chưa cấp quyền)."
+            elif response.status_code == 403:
+                return None, "Lỗi quyền truy cập (Permission Denied)."
+            elif response.status_code == 429:
+                return None, "Quá giới hạn request (Quota Exceeded)."
+            else:
+                return None, f"Lỗi Google API ({response.status_code}): {error_msg}"
 
     except Exception as e:
-        error_msg = str(e)
-        print(f"❌ Lỗi Imagen: {error_msg}")
-        
-        # Kiểm tra xem có phải lỗi do chưa có quyền không
-        if "404" in error_msg or "NotFound" in error_msg:
-            return None, "API Key của bạn chưa được Google cấp quyền dùng 'Nano Banana 3' (Imagen 3). Hãy thử lại sau hoặc đổi Key khác."
-        elif "429" in error_msg:
-            return None, "Hết lượt dùng thử (Quota exceeded) của Google rồi."
-        else:
-            return None, f"Lỗi Google API: {error_msg}"
+        return None, f"Lỗi hệ thống: {str(e)}"
 
 # Hàm tạo ảnh sinh nhật
 async def generate_birthday_image(name, age, job):
-    prompt = f"Happy Birthday {name}, {age} years old, working as {job}, luxury party, cake, 3d render, cinematic lighting, 8k"
+    prompt = f"Happy Birthday {name}, {age} years old, working as {job}, luxury party, cake, 3d render, cinematic lighting, 8k, masterpiece"
     image_data, _ = await generate_image_core(prompt)
     return image_data
 
@@ -129,7 +141,7 @@ async def check_birthdays(client):
         if info["birthday"]["day"] == today.day and info["birthday"]["month"] == today.month:
             if info.get("last_birthday_wish") != today_str:
                 user = discord.utils.get(client.users, name=username)
-                if user: # Chỉ chúc nếu tìm thấy user
+                if user:
                     try:
                         wish_prompt = f"Viết lời chúc sinh nhật ngắn gọn, tình cảm cho {info['name']}, {today.year - info['year']} tuổi, nghề {info['job']}."
                         wish_resp = await text_model.generate_content_async(wish_prompt)
@@ -137,8 +149,6 @@ async def check_birthdays(client):
                         
                         img_data = await generate_birthday_image(info['name'], today.year - info['year'], info['job'])
                         
-                        # Gửi tin nhắn
-                        # Tìm channel đầu tiên bot có thể chat
                         for guild in client.guilds:
                             if user in guild.members:
                                 for channel in guild.text_channels:
@@ -148,7 +158,8 @@ async def check_birthdays(client):
                                             f = discord.File(io.BytesIO(img_data), filename="birthday_nano.png")
                                             await channel.send(content, file=f)
                                         else:
-                                            await channel.send(content + "\n*(Không tạo được ảnh sinh nhật do lỗi API Nano Banana)*")
+                                            # Chỉ báo lỗi nếu không có ảnh, tuyệt đối không dùng fallback
+                                            await channel.send(content + "\n*(Lỗi tạo ảnh Nano Banana 3)*")
                                         break
                                 break
                     except Exception as e:
@@ -168,8 +179,9 @@ async def on_message(message):
             return
 
         async with message.channel.typing():
-            status_msg = await message.reply(f"🍌 Đang dùng **Nano Banana 3** vẽ: *{prompt}*...")
+            status_msg = await message.reply(f"🍌 **Nano Banana 3** đang vẽ: *{prompt}*...")
             
+            # Chỉ gọi hàm này, không có logic fallback nào khác
             image_data, result_msg = await generate_image_core(prompt)
             
             if image_data:
@@ -177,6 +189,7 @@ async def on_message(message):
                 await status_msg.delete()
                 await message.reply(f"✨ Hàng về! (Prompt: {result_msg})", file=f)
             else:
+                # Báo lỗi trực tiếp
                 await status_msg.edit(content=f"❌ Thất bại: {result_msg}")
         return
 
@@ -189,7 +202,6 @@ async def on_message(message):
             
         async with message.channel.typing():
             try:
-                # Xử lý ảnh Vision (Đọc ảnh)
                 if message.attachments:
                     img_data = await message.attachments[0].read()
                     img = Image.open(io.BytesIO(img_data))
@@ -198,7 +210,6 @@ async def on_message(message):
                     await message.reply(resp.text.strip())
                     return
 
-                # Chat thường
                 prompt = f"{personality}\nUser: {user_msg}\nTrả lời:"
                 resp = await text_model.generate_content_async(prompt)
                 await message.reply(resp.text.strip())
