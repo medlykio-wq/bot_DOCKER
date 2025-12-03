@@ -1,18 +1,13 @@
 import discord
 import google.generativeai as genai
 import asyncio
-import requests
 import io
-from PIL import Image
 import os
 import flask
 import threading
 from collections import defaultdict, deque
 import datetime
 import time
-import aiohttp
-import urllib.parse
-import random
 
 # ================= CẤU HÌNH =================
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -22,13 +17,14 @@ if not DISCORD_TOKEN or not GEMINI_API_KEY:
     print("❌ Lỗi: Thiếu Token!")
     exit(1)
 
-print("🔄 Đang khởi động Yoo Ji Min (Phiên bản Nano Banana 3 - Robust Mode)...")
+print("🔄 Đang khởi động Yoo Ji Min (Chế độ Nano Banana 3 - Hardcore)...")
 
 genai.configure(api_key=GEMINI_API_KEY)
-# Sử dụng gemini-1.5-flash cho tốc độ và ổn định
-TEXT_MODEL_NAME = 'gemini-1.5-flash' 
-model = genai.GenerativeModel(TEXT_MODEL_NAME)
+# Model chat xử lý text
+TEXT_MODEL_NAME = 'gemini-1.5-flash'
+text_model = genai.GenerativeModel(TEXT_MODEL_NAME)
 
+# Lưu trữ lịch sử hội thoại
 conversation_history = defaultdict(lambda: deque(maxlen=30))
 server_memory = deque(maxlen=100)
 
@@ -49,48 +45,63 @@ Bạn là Yoo Ji Min, một AI thông minh và tinh nghịch.
 - Với người khác: Xưng hô linh hoạt, vui vẻ.
 """
 
-# ================= HÀM XỬ LÝ ẢNH (CORE IMAGE GEN - FIX LỖI) =================
+# ================= HÀM XỬ LÝ ẢNH (CHỈ DÙNG GEMINI IMAGEN 3) =================
 
-async def generate_image_core(prompt, width=1024, height=1024):
-    print(f"🎨 Yêu cầu vẽ: {prompt}")
+async def generate_image_core(prompt):
+    print(f"🎨 Yêu cầu vẽ (Nano Banana 3): {prompt}")
     
     final_prompt = prompt
     
-    # BƯỚC 1: Cố gắng dịch sang tiếng Anh để ảnh đẹp hơn
-    # Nếu lỗi bước này, bỏ qua và dùng luôn tiếng Việt (Fallback)
+    # BƯỚC 1: Dịch prompt sang tiếng Anh bằng Gemini Flash để tối ưu hóa đầu vào cho Imagen 3
     try:
-        trans_prompt = f"Translate this prompt to English for image generation, keep it detailed, direct translation only: {prompt}"
-        # Thêm timeout để không bị treo nếu Gemini lag
-        trans_response = await asyncio.wait_for(model.generate_content_async(trans_prompt), timeout=5.0)
+        trans_prompt = f"Translate this prompt to English for image generation, keep it detailed: {prompt}"
+        trans_response = await text_model.generate_content_async(trans_prompt)
         final_prompt = trans_response.text.strip()
-        final_prompt += ", 8k resolution, highly detailed, masterpiece, cinematic lighting"
         print(f"✅ Đã dịch prompt: {final_prompt}")
     except Exception as e:
-        print(f"⚠️ Không dịch được prompt (dùng gốc): {e}")
-        # Không return None, mà vẫn tiếp tục vẽ bằng prompt gốc
-        pass
+        print(f"⚠️ Lỗi dịch thuật: {e}")
+        pass # Dùng tạm prompt tiếng Việt
 
-    # BƯỚC 2: Vẽ bằng Pollinations (Flux Model)
+    # BƯỚC 2: Gọi trực tiếp model IMAGEN 3 (Nano Banana) của Google
     try:
-        encoded_prompt = urllib.parse.quote(final_prompt)
-        # Thêm seed ngẫu nhiên để ảnh không bị trùng
-        seed = random.randint(1, 100000)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&model=flux&nologo=true&seed={seed}"
+        # Chạy trong thread riêng vì thư viện genai có thể chặn luồng chính
+        def run_imagen():
+            # Thử gọi model Imagen 3 mới nhất
+            # Lưu ý: Nếu Key chưa được cấp quyền Imagen 3, nó sẽ lỗi ở đây.
+            imagen_model = genai.ImageGenerationModel("imagen-3.0-generate-001")
+            result = imagen_model.generate_images(
+                prompt=final_prompt,
+                number_of_images=1,
+                aspect_ratio="1:1",
+                safety_filter="block_only_high",
+            )
+            return result
+
+        # Chạy hàm blocking trong executor để không lag bot Discord
+        result = await asyncio.to_thread(run_imagen)
         
-        timeout = aiohttp.ClientTimeout(total=30) # 30 giây timeout
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    image_data = await response.read()
-                    return image_data, final_prompt
-                else:
-                    return None, f"Lỗi Server Ảnh: {response.status}"
+        # Lấy ảnh về
+        if result and result.images:
+            image_bytes = result.images[0].image_bytes
+            return image_bytes, final_prompt
+        else:
+            return None, "Google không trả về ảnh nào."
+
     except Exception as e:
-        return None, f"Lỗi kết nối: {str(e)}"
+        error_msg = str(e)
+        print(f"❌ Lỗi Imagen: {error_msg}")
+        
+        # Kiểm tra xem có phải lỗi do chưa có quyền không
+        if "404" in error_msg or "NotFound" in error_msg:
+            return None, "API Key của bạn chưa được Google cấp quyền dùng 'Nano Banana 3' (Imagen 3). Hãy thử lại sau hoặc đổi Key khác."
+        elif "429" in error_msg:
+            return None, "Hết lượt dùng thử (Quota exceeded) của Google rồi."
+        else:
+            return None, f"Lỗi Google API: {error_msg}"
 
 # Hàm tạo ảnh sinh nhật
 async def generate_birthday_image(name, age, job):
-    prompt = f"Happy Birthday {name}, {age} years old, {job}, luxury party, cake, 3d render, cinematic"
+    prompt = f"Happy Birthday {name}, {age} years old, working as {job}, luxury party, cake, 3d render, cinematic lighting, 8k"
     image_data, _ = await generate_image_core(prompt)
     return image_data
 
@@ -102,7 +113,7 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f'✅ {client.user} đã Online!')
-    await client.change_presence(activity=discord.Game(name="!ve để tạo ảnh 🎨"))
+    await client.change_presence(activity=discord.Game(name="vẽ bằng Nano Banana 3 🍌"))
     client.loop.create_task(birthday_check_loop())
 
 async def birthday_check_loop():
@@ -117,8 +128,32 @@ async def check_birthdays(client):
     for username, info in server_members.items():
         if info["birthday"]["day"] == today.day and info["birthday"]["month"] == today.month:
             if info.get("last_birthday_wish") != today_str:
-                user = discord.utils.get(client.users, name=username) # Cách tìm user an toàn hơn
-                # Logic gửi lời chúc và ảnh...
+                user = discord.utils.get(client.users, name=username)
+                if user: # Chỉ chúc nếu tìm thấy user
+                    try:
+                        wish_prompt = f"Viết lời chúc sinh nhật ngắn gọn, tình cảm cho {info['name']}, {today.year - info['year']} tuổi, nghề {info['job']}."
+                        wish_resp = await text_model.generate_content_async(wish_prompt)
+                        wish_msg = wish_resp.text.strip()
+                        
+                        img_data = await generate_birthday_image(info['name'], today.year - info['year'], info['job'])
+                        
+                        # Gửi tin nhắn
+                        # Tìm channel đầu tiên bot có thể chat
+                        for guild in client.guilds:
+                            if user in guild.members:
+                                for channel in guild.text_channels:
+                                    if channel.permissions_for(guild.me).send_messages:
+                                        content = f"🎉 **CHÚC MỪNG SINH NHẬT!** 🎉\n{user.mention}\n{wish_msg}"
+                                        if img_data:
+                                            f = discord.File(io.BytesIO(img_data), filename="birthday_nano.png")
+                                            await channel.send(content, file=f)
+                                        else:
+                                            await channel.send(content + "\n*(Không tạo được ảnh sinh nhật do lỗi API Nano Banana)*")
+                                        break
+                                break
+                    except Exception as e:
+                        print(f"Lỗi chúc sinh nhật: {e}")
+                
                 info["last_birthday_wish"] = today_str
 
 @client.event
@@ -133,18 +168,16 @@ async def on_message(message):
             return
 
         async with message.channel.typing():
-            # Báo cho người dùng biết đang làm gì
-            status_msg = await message.reply(f"🖌️ Đang vẽ: *{prompt}*...")
+            status_msg = await message.reply(f"🍌 Đang dùng **Nano Banana 3** vẽ: *{prompt}*...")
             
             image_data, result_msg = await generate_image_core(prompt)
             
             if image_data:
-                f = discord.File(io.BytesIO(image_data), filename="art.png")
+                f = discord.File(io.BytesIO(image_data), filename="nano_art.png")
                 await status_msg.delete()
-                await message.reply(f"✨ Xong rồi nè! (Prompt: {result_msg})", file=f)
+                await message.reply(f"✨ Hàng về! (Prompt: {result_msg})", file=f)
             else:
-                # In lỗi cụ thể ra để debug
-                await status_msg.edit(content=f"❌ Không vẽ được rồi: {result_msg}")
+                await status_msg.edit(content=f"❌ Thất bại: {result_msg}")
         return
 
     # === CHAT ===
@@ -156,18 +189,18 @@ async def on_message(message):
             
         async with message.channel.typing():
             try:
-                # Xử lý ảnh Vision
+                # Xử lý ảnh Vision (Đọc ảnh)
                 if message.attachments:
                     img_data = await message.attachments[0].read()
                     img = Image.open(io.BytesIO(img_data))
                     prompt = f"{personality}\nUser gửi ảnh và hỏi: {user_msg}. Hãy trả lời."
-                    resp = await model.generate_content_async([prompt, img])
+                    resp = await text_model.generate_content_async([prompt, img])
                     await message.reply(resp.text.strip())
                     return
 
                 # Chat thường
                 prompt = f"{personality}\nUser: {user_msg}\nTrả lời:"
-                resp = await model.generate_content_async(prompt)
+                resp = await text_model.generate_content_async(prompt)
                 await message.reply(resp.text.strip())
             except Exception as e:
                 print(f"Lỗi Chat: {e}")
@@ -176,7 +209,7 @@ async def on_message(message):
 # ================= WEB SERVER =================
 app = flask.Flask(__name__)
 @app.route('/')
-def home(): return "Yoo Ji Min is OK"
+def home(): return "Yoo Ji Min (Nano Banana Mode) is OK"
 def run_web(): app.run(host='0.0.0.0', port=8080)
 def keep_alive():
     t = threading.Thread(target=run_web)
@@ -185,4 +218,7 @@ def keep_alive():
 
 if __name__ == "__main__":
     keep_alive()
-    client.run(DISCORD_TOKEN)
+    try:
+        client.run(DISCORD_TOKEN)
+    except Exception as e:
+        print(f"❌ Lỗi Bot: {e}")
