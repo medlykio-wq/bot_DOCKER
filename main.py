@@ -16,11 +16,13 @@ import urllib.parse
 import random
 import json
 from typing import Optional
+from datetime import timedelta
 
 # Lấy token từ environment variables
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-WEATHER_API_KEY = os.getenv('WEATHER_API_KEY')  # Thêm cho thời tiết
+WEATHER_API_KEY = os.getenv('WEATHER_API_KEY')  # OpenWeatherMap
+WEATHERAPI_KEY = os.getenv('WEATHERAPI_KEY')    # WeatherAPI.com (dự phòng)
 
 # Kiểm tra environment variables
 if not DISCORD_TOKEN:
@@ -39,8 +41,8 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 # Lưu trữ lịch sử hội thoại theo channel_id
 conversation_history = defaultdict(lambda: deque(maxlen=200))
 
-# Lưu trữ tất cả tin nhắn trong server để học hỏi (chỉ đọc) - TĂNG LÊN 1000
-server_memory = deque(maxlen=1000)
+# Lưu trữ tất cả tin nhắn trong server để học hỏi (chỉ đọc) - GIẢM XUỐNG 500
+server_memory = deque(maxlen=500)
 
 # Thông tin thành viên server
 server_members = {
@@ -162,17 +164,14 @@ LUÔN DÙNG EMOJI PHÙ HỢP VÀ EMOJI KHÔNG TÍNH VÀO GIỚI HẠN CHỮ!
 # CÁC HÀM TIỆN ÍCH MỚI
 # ==============================================
 
-# Hàm lấy thời tiết từ OpenWeatherMap
-async def get_weather(location: str = "Hanoi") -> Optional[str]:
-    """Lấy thông tin thời tiết từ OpenWeatherMap API"""
+# Hàm lấy thời tiết từ OpenWeatherMap (hiện tại)
+async def get_current_weather(location: str = "Hanoi") -> Optional[str]:
+    """Lấy thông tin thời tiết hiện tại từ OpenWeatherMap API"""
     try:
         if not WEATHER_API_KEY:
-            return None
+            return await get_weather_backup(location, "current")
         
-        # Mã hóa địa điểm
         encoded_location = urllib.parse.quote(location)
-        
-        # URL API với đơn vị metric (Celsius)
         url = f"https://api.openweathermap.org/data/2.5/weather?q={encoded_location}&appid={WEATHER_API_KEY}&units=metric&lang=vi"
         
         async with aiohttp.ClientSession() as session:
@@ -180,7 +179,6 @@ async def get_weather(location: str = "Hanoi") -> Optional[str]:
                 if response.status == 200:
                     data = await response.json()
                     
-                    # Trích xuất thông tin
                     temp = data['main']['temp']
                     feels_like = data['main']['feels_like']
                     humidity = data['main']['humidity']
@@ -188,10 +186,10 @@ async def get_weather(location: str = "Hanoi") -> Optional[str]:
                     wind_speed = data['wind']['speed']
                     city = data['name']
                     
-                    # Emoji theo mô tả thời tiết
                     weather_emoji = {
                         'mây': '☁️', 'nắng': '☀️', 'mưa': '🌧️', 'dông': '⛈️',
-                        'sương mù': '🌫️', 'tuyết': '❄️', 'gió': '💨'
+                        'sương mù': '🌫️', 'tuyết': '❄️', 'gió': '💨', 'quang': '☀️',
+                        'thoáng': '⛅', 'bão': '🌀'
                     }
                     
                     emoji = '🌈'
@@ -200,23 +198,314 @@ async def get_weather(location: str = "Hanoi") -> Optional[str]:
                             emoji = value
                             break
                     
-                    return (f"**Dự báo thời tiết {city}:** {emoji}\n"
+                    return (f"**🌤️ Thời tiết hiện tại tại {city}:** {emoji}\n"
                            f"🌡️ **Nhiệt độ:** {temp}°C (cảm giác như {feels_like}°C)\n"
                            f"💧 **Độ ẩm:** {humidity}%\n"
                            f"🌬️ **Gió:** {wind_speed} m/s\n"
                            f"📝 **Mô tả:** {weather_desc.capitalize()}")
                     
                 else:
-                    return None
+                    return await get_weather_backup(location, "current")
     except Exception as e:
-        print(f"❌ Lỗi lấy thời tiết: {e}")
+        print(f"❌ Lỗi lấy thời tiết hiện tại: {e}")
+        return await get_weather_backup(location, "current")
+
+# Hàm lấy dự báo thời tiết cho ngày cụ thể
+async def get_weather_forecast(location: str = "Hanoi", day_offset: int = 0) -> Optional[str]:
+    """Lấy dự báo thời tiết cho ngày hôm nay (0), ngày mai (1), ngày kia (2)"""
+    try:
+        # Ưu tiên WeatherAPI.com vì có dự báo 3 ngày free
+        if WEATHERAPI_KEY:
+            return await get_weatherapi_forecast(location, day_offset)
+        
+        # Fallback: OpenWeatherMap (5 day/3 hour forecast)
+        if WEATHER_API_KEY:
+            return await get_openweather_forecast(location, day_offset)
+        
+        # Final fallback: Open-Meteo (free, no API key needed)
+        return await get_openmeteo_forecast(location, day_offset)
+        
+    except Exception as e:
+        print(f"❌ Lỗi lấy dự báo thời tiết: {e}")
         return None
 
-# Hàm bói bài Tarot
-async def tarot_reading() -> str:
-    """Trải bài Tarot ngẫu nhiên"""
+# Hàm dự phòng lấy thời tiết từ WeatherAPI.com
+async def get_weatherapi_forecast(location: str, day_offset: int) -> Optional[str]:
+    """Lấy dự báo từ WeatherAPI.com (free tier)"""
+    try:
+        encoded_location = urllib.parse.quote(location)
+        url = f"https://api.weatherapi.com/v1/forecast.json?key={WEATHERAPI_KEY}&q={encoded_location}&days=3&lang=vi"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    if day_offset >= len(data['forecast']['forecastday']):
+                        day_offset = 0  # Fallback về hôm nay
+                    
+                    forecast_day = data['forecast']['forecastday'][day_offset]
+                    date = forecast_day['date']
+                    day_data = forecast_day['day']
+                    
+                    max_temp = day_data['maxtemp_c']
+                    min_temp = day_data['mintemp_c']
+                    avg_temp = day_data['avgtemp_c']
+                    condition = day_data['condition']['text']
+                    humidity = day_data['avghumidity']
+                    wind_speed = day_data['maxwind_kph'] / 3.6  # Convert km/h to m/s
+                    
+                    # Map ngày offset thành tên ngày
+                    day_names = {0: "HÔM NAY", 1: "NGÀY MAI", 2: "NGÀY KIA"}
+                    day_name = day_names.get(day_offset, f"SAU {day_offset} NGÀY")
+                    
+                    # Emoji theo điều kiện
+                    condition_emoji = {
+                        'nắng': '☀️', 'mưa': '🌧️', 'mây': '☁️', 'quang': '☀️',
+                        'dông': '⛈️', 'sương mù': '🌫️', 'tuyết': '❄️',
+                        'mưa nhẹ': '🌦️', 'mưa rào': '🌧️'
+                    }
+                    
+                    emoji = '🌈'
+                    for key, value in condition_emoji.items():
+                        if key in condition.lower():
+                            emoji = value
+                            break
+                    
+                    return (f"**🌤️ Dự báo {day_name} ({date}) tại {location.title()}:** {emoji}\n"
+                           f"🌡️ **Nhiệt độ:** {min_temp}°C - {max_temp}°C (trung bình {avg_temp}°C)\n"
+                           f"💧 **Độ ẩm:** {humidity}%\n"
+                           f"🌬️ **Gió tối đa:** {wind_speed:.1f} m/s\n"
+                           f"📝 **Điều kiện:** {condition}\n"
+                           f"📍 **Nguồn:** WeatherAPI.com")
+                    
+    except Exception as e:
+        print(f"❌ Lỗi WeatherAPI: {e}")
+        return None
+
+# Hàm dự phòng từ Open-Meteo (hoàn toàn miễn phí, không cần API key)
+async def get_openmeteo_forecast(location: str, day_offset: int) -> Optional[str]:
+    """Lấy dự báo từ Open-Meteo API (free, no API key)"""
+    try:
+        # Tìm tọa độ từ tên thành phố (geocoding)
+        geocode_url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(location)}&count=1"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(geocode_url) as response:
+                if response.status == 200:
+                    geo_data = await response.json()
+                    
+                    if not geo_data.get('results'):
+                        return None
+                    
+                    result = geo_data['results'][0]
+                    lat = result['latitude']
+                    lon = result['longitude']
+                    city_name = result['name']
+                    
+                    # Lấy dự báo thời tiết
+                    forecast_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max&timezone=auto&forecast_days=3"
+                    
+                    async with session.get(forecast_url) as forecast_response:
+                        if forecast_response.status == 200:
+                            forecast_data = await forecast_response.json()
+                            
+                            if day_offset >= len(forecast_data['daily']['time']):
+                                day_offset = 0
+                            
+                            date = forecast_data['daily']['time'][day_offset]
+                            max_temp = forecast_data['daily']['temperature_2m_max'][day_offset]
+                            min_temp = forecast_data['daily']['temperature_2m_min'][day_offset]
+                            precipitation = forecast_data['daily']['precipitation_sum'][day_offset]
+                            wind_speed = forecast_data['daily']['windspeed_10m_max'][day_offset]
+                            
+                            # Xác định điều kiện thời tiết dựa trên lượng mưa
+                            if precipitation > 5:
+                                condition = "Mưa"
+                                emoji = "🌧️"
+                            elif precipitation > 0.5:
+                                condition = "Mưa nhẹ"
+                                emoji = "🌦️"
+                            else:
+                                condition = "Quang đãng"
+                                emoji = "☀️"
+                            
+                            day_names = {0: "HÔM NAY", 1: "NGÀY MAI", 2: "NGÀY KIA"}
+                            day_name = day_names.get(day_offset, f"SAU {day_offset} NGÀY")
+                            
+                            return (f"**🌤️ Dự báo {day_name} ({date}) tại {city_name}:** {emoji}\n"
+                                   f"🌡️ **Nhiệt độ:** {min_temp}°C - {max_temp}°C\n"
+                                   f"💧 **Lượng mưa:** {precipitation} mm\n"
+                                   f"🌬️ **Gió tối đa:** {wind_speed} km/h\n"
+                                   f"📝 **Điều kiện:** {condition}\n"
+                                   f"📍 **Nguồn:** Open-Meteo.com")
+                            
+    except Exception as e:
+        print(f"❌ Lỗi Open-Meteo: {e}")
+        return None
+
+# Hàm dự phòng từ OpenWeatherMap (5 day forecast)
+async def get_openweather_forecast(location: str, day_offset: int) -> Optional[str]:
+    """Lấy dự báo từ OpenWeatherMap (5 day/3 hour forecast)"""
+    try:
+        encoded_location = urllib.parse.quote(location)
+        url = f"https://api.openweathermap.org/data/2.5/forecast?q={encoded_location}&appid={WEATHER_API_KEY}&units=metric&lang=vi"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    # Nhóm dự báo theo ngày
+                    forecasts_by_day = {}
+                    for forecast in data['list']:
+                        forecast_time = datetime.datetime.fromtimestamp(forecast['dt'])
+                        day_key = forecast_time.date()
+                        
+                        if day_key not in forecasts_by_day:
+                            forecasts_by_day[day_key] = []
+                        forecasts_by_day[day_key].append(forecast)
+                    
+                    # Sắp xếp các ngày
+                    sorted_days = sorted(forecasts_by_day.keys())
+                    
+                    if day_offset >= len(sorted_days):
+                        day_offset = 0
+                    
+                    target_day = sorted_days[day_offset]
+                    day_forecasts = forecasts_by_day[target_day]
+                    
+                    # Tính toán giá trị trung bình/giá trị đại diện
+                    temps = [f['main']['temp'] for f in day_forecasts]
+                    feels_like = [f['main']['feels_like'] for f in day_forecasts]
+                    humidity = [f['main']['humidity'] for f in day_forecasts]
+                    wind_speeds = [f['wind']['speed'] for f in day_forecasts]
+                    conditions = [f['weather'][0]['description'] for f in day_forecasts]
+                    
+                    avg_temp = sum(temps) / len(temps)
+                    max_temp = max(temps)
+                    min_temp = min(temps)
+                    avg_humidity = sum(humidity) / len(humidity)
+                    avg_wind = sum(wind_speeds) / len(wind_speeds)
+                    
+                    # Tìm điều kiện phổ biến nhất
+                    condition_counter = {}
+                    for cond in conditions:
+                        condition_counter[cond] = condition_counter.get(cond, 0) + 1
+                    most_common_condition = max(condition_counter, key=condition_counter.get)
+                    
+                    weather_emoji = {
+                        'mây': '☁️', 'nắng': '☀️', 'mưa': '🌧️', 'dông': '⛈️',
+                        'sương mù': '🌫️', 'tuyết': '❄️', 'gió': '💨', 'quang': '☀️'
+                    }
+                    
+                    emoji = '🌈'
+                    for key, value in weather_emoji.items():
+                        if key in most_common_condition.lower():
+                            emoji = value
+                            break
+                    
+                    day_names = {0: "HÔM NAY", 1: "NGÀY MAI", 2: "NGÀY KIA", 3: "SAU 3 NGÀY", 4: "SAU 4 NGÀY"}
+                    day_name = day_names.get(day_offset, f"SAU {day_offset} NGÀY")
+                    
+                    return (f"**🌤️ Dự báo {day_name} ({target_day}) tại {data['city']['name']}:** {emoji}\n"
+                           f"🌡️ **Nhiệt độ:** {min_temp:.1f}°C - {max_temp:.1f}°C (trung bình {avg_temp:.1f}°C)\n"
+                           f"💧 **Độ ẩm:** {avg_humidity:.0f}%\n"
+                           f"🌬️ **Gió trung bình:** {avg_wind:.1f} m/s\n"
+                           f"📝 **Điều kiện:** {most_common_condition.capitalize()}")
+                    
+    except Exception as e:
+        print(f"❌ Lỗi OpenWeather dự báo: {e}")
+        return None
+
+# Hàm backup tổng hợp
+async def get_weather_backup(location: str, forecast_type: str = "current") -> Optional[str]:
+    """Hàm backup lấy thời tiết từ nhiều nguồn"""
+    try:
+        # Thử Open-Meteo trước (free)
+        if forecast_type == "current":
+            return await get_openmeteo_forecast(location, 0)
+        else:
+            return await get_openmeteo_forecast(location, 1 if "mai" in forecast_type else 0)
+    except:
+        return "❌ Hiện không thể lấy thông tin thời tiết. Vui lòng thử lại sau!"
+
+# Hàm phân tích câu hỏi thời tiết
+def parse_weather_query(query: str):
+    """Phân tích câu hỏi để xác định địa điểm và ngày"""
+    query_lower = query.lower()
+    
+    # Xác định địa điểm mặc định
+    location = "Hanoi"
+    
+    # Danh sách thành phố phổ biến
+    cities = {
+        'hà nội': 'Hanoi', 'hanoi': 'Hanoi',
+        'hồ chí minh': 'Ho Chi Minh City', 'hcm': 'Ho Chi Minh City', 'sài gòn': 'Ho Chi Minh City',
+        'đà nẵng': 'Da Nang', 'danang': 'Da Nang',
+        'hải phòng': 'Hai Phong', 'haiphong': 'Hai Phong',
+        'cần thơ': 'Can Tho', 'cantho': 'Can Tho',
+        'nha trang': 'Nha Trang', 'nhatrang': 'Nha Trang',
+        'huế': 'Hue', 'hue': 'Hue',
+        'vũng tàu': 'Vung Tau', 'vungtau': 'Vung Tau'
+    }
+    
+    # Tìm thành phố trong câu hỏi
+    for city_key, city_value in cities.items():
+        if city_key in query_lower:
+            location = city_value
+            break
+    
+    # Xác định ngày
+    day_offset = 0  # 0 = hôm nay
+    if 'ngày mai' in query_lower or 'mai' in query_lower:
+        day_offset = 1
+    elif 'ngày kia' in query_lower or 'kia' in query_lower:
+        day_offset = 2
+    elif 'hôm nay' in query_lower or 'hôm nay' in query_lower:
+        day_offset = 0
+    elif 'hôm qua' in query_lower:
+        day_offset = -1
+    
+    return location, day_offset
+
+# Hàm tạo ảnh bài Tarot bằng Pollinations AI
+async def generate_tarot_image(card_name, meaning):
+    """Tạo ảnh lá bài Tarot bằng Pollinations AI"""
+    try:
+        prompt = f"""
+        Mystical tarot card illustration: {card_name}. 
+        Meaning: {meaning}.
+        Art style: fantasy, mystical, magical, detailed tarot card design,
+        intricate patterns, symbolic imagery, glowing effects,
+        professional tarot card illustration, esoteric symbols,
+        rich colors, gold accents, mystical atmosphere.
+        Style: fantasy art, digital painting, tarot card.
+        """
+        
+        encoded_prompt = urllib.parse.quote(prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    return await response.read()
+                else:
+                    print(f"❌ Lỗi tải ảnh Tarot: {response.status}")
+                    return None
+                    
+    except Exception as e:
+        print(f"❌ Lỗi tạo ảnh Tarot: {e}")
+        return None
+
+# Hàm bói bài Tarot (CẬP NHẬT: tạo ảnh + giải thích)
+async def tarot_reading() -> tuple:
+    """Trải bài Tarot ngẫu nhiên và trả về (card, reading_text, image_data)"""
     try:
         card = random.choice(TAROT_CARDS)
+        
+        # Tạo ảnh lá bài
+        image_data = await generate_tarot_image(card['name'], card['meaning'])
         
         # Xác định ý nghĩa chi tiết
         reading_prompt = f"""
@@ -230,73 +519,76 @@ Hãy giải thích chi tiết lá bài này trong bối cảnh hiện tại:
 4. Dùng emoji phù hợp 🃏✨
 5. Giọng văn huyền bí, thú vị
 6. Độ dài: khoảng 100-150 chữ
+7. Kết thúc bằng một câu khẳng định tích cực
 
 Giải bài:
 """
         response = model.generate_content(reading_prompt)
-        return f"**🎴 Lá bài Tarot của bạn: {card['name']}**\n{response.text.strip()}"
+        reading_text = response.text.strip()
+        
+        return card, reading_text, image_data
+        
     except Exception as e:
-        return f"❌ Lỗi khi bói bài Tarot: {str(e)}"
+        print(f"❌ Lỗi khi bói bài Tarot: {str(e)}")
+        return None, f"❌ Lỗi khi bói bài Tarot: {str(e)}", None
 
-# Hàm tính thần số học
-async def numerology_reading(name: str, birth_date: str = None) -> str:
-    """Tính toán thần số học"""
-    try:
-        # Nếu không có ngày sinh, chỉ tính theo tên
-        prompt = f"""
-Tên: {name}
-{"Ngày sinh: " + birth_date if birth_date else "Không có ngày sinh"}
-
-Hãy phân tích thần số học cho người này:
-1. Tính toán các con số chủ đạo (nếu có ngày sinh)
-2. Phân tích ý nghĩa tên
-3. Đặc điểm tính cách
-4. Điểm mạnh và điểm yếu
-5. Lời khuyên phát triển
-6. Dùng emoji phù hợp 🔢✨
-7. Giọng văn chuyên nghiệp, chi tiết
-8. Độ dài: khoảng 150-200 chữ
-
-Phân tích thần số học:
-"""
-        response = model.generate_content(prompt)
-        return f"**🔮 Phân tích thần số học cho {name}**\n{response.text.strip()}"
-    except Exception as e:
-        return f"❌ Lỗi khi tính thần số học: {str(e)}"
-
-# Hàm tóm tắt drama từ chat history
+# Hàm tóm tắt drama từ chat history (ĐÃ SỬA: TÓM TẮT TOÀN BỘ 500 TIN NHẮN)
 async def summarize_drama() -> str:
-    """Đọc 1000 tin nhắn gần nhất và tóm tắt drama"""
+    """Đọc TOÀN BỘ 500 tin nhắn đã lưu và tóm tắt"""
     try:
         if not server_memory:
-            return "🤷‍♀️ Chưa có drama nào để hóng cả, chat nhiều lên đi nào! 💬"
+            return "📊 Hiện chưa có đủ dữ liệu chat để tóm tắt. Mọi người hãy trò chuyện nhiều hơn nhé! 💬"
         
-        # Lấy 1000 tin nhắn gần nhất
-        recent_messages = list(server_memory)[-1000:]
+        # Lấy TOÀN BỘ 500 tin nhắn đã lưu
+        all_messages = list(server_memory)
         
-        # Chuẩn bị prompt
-        messages_text = "\n".join(recent_messages[-100:])  # Chỉ lấy 100 tin nhắn gần nhất để tránh prompt quá dài
+        # Kiểm tra số lượng tin nhắn
+        total_messages = len(all_messages)
+        print(f"📝 Đang tóm tắt {total_messages} tin nhắn...")
+        
+        # Nếu có ít hơn 10 tin nhắn
+        if total_messages < 10:
+            return "📊 Chưa có đủ tin nhắn để tóm tắt. Hãy chat thêm để tôi có thể tóm tắt tốt hơn! 💬"
+        
+        # Chuẩn bị tất cả tin nhắn cho prompt
+        messages_text = "\n".join(all_messages)
+        
+        # Ước tính độ dài của prompt
+        prompt_length = len(messages_text)
+        print(f"📏 Độ dài prompt: {prompt_length} ký tự")
+        
+        # Nếu prompt quá dài, cắt bớt nhưng vẫn giữ tối đa có thể
+        if prompt_length > 20000:  # Giới hạn an toàn cho Gemini
+            # Lấy 300 tin nhắn gần nhất
+            messages_text = "\n".join(all_messages[-300:])
+            print(f"⚠️ Prompt quá dài, chỉ lấy 300 tin nhắn gần nhất")
         
         drama_prompt = f"""
-Dưới đây là lịch sử chat gần đây trong server:
+Dưới đây là TOÀN BỘ lịch sử chat trong server (tối đa 500 tin nhắn gần nhất):
 {messages_text}
 
-Hãy đóng vai một người thích HÓNG HỚT, tóm tắt lại những drama, câu chuyện thú vị trong server:
-1. Giọng văn VUI VẺ, HÀI HƯỚC, THÍCH HÓNG HỚT
-2. Nhận xét về các tình huống hài hước, thú vị
-3. Đừng quên thêm emoji dí dỏm
-4. Có thể "buôn chuyện" một chút nhưng đừng ác ý
-5. Độ dài: khoảng 150-200 chữ
-6. Dùng từ ngữ trẻ trung, hiện đại
-7. Có thể nhắc đến tên thành viên nếu có trong chat
+Hãy tóm tắt một cách CHUYÊN NGHIỆP và KHÁCH QUAN những nội dung chính trong cuộc trò chuyện:
+1. Giọng văn TRUNG LẬP, CHUYÊN NGHIỆP, KHÔNG hài hước tấu hài
+2. Tóm tắt các chủ đề chính đã thảo luận
+3. Điểm qua các sự kiện quan trọng (nếu có)
+4. Dùng emoji vừa phải, phù hợp
+5. Độ dài: khoảng 150-200 chữ (tương ứng với lượng tin nhắn)
+6. Tập trung vào thông tin thực tế, không bình luận cá nhân
+7. Có thể nhắc đến tên thành viên nếu có trong context
+8. Nếu có nhiều chủ đề, hãy phân loại rõ ràng
 
-Tóm tắt drama của mình đây:
+Bản tóm tắt CHI TIẾT:
 """
         response = model.generate_content(drama_prompt)
-        return f"**🎭 BẢN TIN HÓNG HỚT CẬP NHẬT** 🍿\n{response.text.strip()}"
+        summary = response.text.strip()
+        
+        # Thêm thông tin thống kê
+        stats = f"\n\n📊 **Thống kê:** Tóm tắt từ {total_messages} tin nhắn gần nhất"
+        
+        return f"**📊 TÓM TẮT HOẠT ĐỘNG SERVER**\n{summary}{stats}"
     except Exception as e:
         print(f"❌ Lỗi khi tóm tắt drama: {e}")
-        return "❌ Mình bị lỗi khi hóng hớt rồi, thử lại sau nhé! 😅"
+        return "❌ Đã xảy ra lỗi khi tóm tắt. Có thể có quá nhiều tin nhắn để xử lý. Vui lòng thử lại sau!"
 
 # Hàm tạo ảnh sinh nhật bằng Pollinations AI
 async def generate_birthday_image(name, age, job):
@@ -682,46 +974,62 @@ async def on_message(message):
     # XỬ LÝ CÁC LỆNH MỚI
     # ==============================================
     
-    # Lệnh Tarot
+    # Lệnh Tarot (ĐÃ CẬP NHẬT: gửi ảnh + giải thích)
     if message.content.startswith('!tarot'):
         await message.channel.send("🔮 Đang rút lá bài Tarot cho bạn...")
-        tarot_result = await tarot_reading()
-        await message.channel.send(tarot_result)
-        return
-
-    # Lệnh Thần số học
-    if message.content.startswith('!thansohoc') or message.content.startswith('!numerology'):
-        parts = message.content.split()
-        if len(parts) >= 2:
-            name = parts[1]
-            birth_date = parts[2] if len(parts) >= 3 else None
-            await message.channel.send(f"🔢 Đang tính thần số học cho {name}...")
-            numerology_result = await numerology_reading(name, birth_date)
-            await message.channel.send(numerology_result)
+        
+        # Lấy thông tin bài Tarot
+        card, reading_text, image_data = await tarot_reading()
+        
+        if card and reading_text:
+            # Gửi ảnh lá bài trước
+            if image_data:
+                image_file = discord.File(io.BytesIO(image_data), filename=f"tarot_{card['name'].replace(' ', '_')}.png")
+                await message.channel.send(
+                    f"**🎴 Lá bài của bạn: {card['name']}**",
+                    file=image_file
+                )
+            
+            # Chờ một chút rồi gửi giải thích
+            await asyncio.sleep(1)
+            
+            # Gửi giải thích
+            await message.channel.send(
+                f"**🔮 Giải thích lá bài {card['name']}:**\n{reading_text}"
+            )
         else:
-            await message.channel.send("❌ Cú pháp: `!thansohoc [tên] (ngày sinh)`\nVí dụ: `!thansohoc Nguyễn Văn A 15/05/1995`")
+            await message.channel.send("❌ Đã xảy ra lỗi khi rút bài Tarot. Vui lòng thử lại!")
         return
 
-    # Lệnh Drama
+    # Lệnh Drama (ĐÃ SỬA: TÓM TẮT TOÀN BỘ 500 TIN NHẮN)
     if message.content.startswith('!drama'):
-        await message.channel.send("🍿 Đang hóng hớt drama cho bạn...")
+        await message.channel.send("📊 Đang tóm tắt toàn bộ 500 tin nhắn gần nhất...")
         drama_summary = await summarize_drama()
         await message.channel.send(drama_summary)
         return
 
-    # Lệnh thời tiết
+    # Lệnh thời tiết (ĐÃ NÂNG CẤP)
     if message.content.startswith('!weather') or message.content.startswith('!thoitiet'):
         parts = message.content.split()
-        location = "Hanoi"  # Mặc định Hà Nội
-        if len(parts) >= 2:
-            location = " ".join(parts[1:])
+        query = " ".join(parts[1:]) if len(parts) >= 2 else "hà nội hôm nay"
         
-        await message.channel.send(f"🌤️ Đang lấy dự báo thời tiết cho {location}...")
-        weather_info = await get_weather(location)
+        await message.channel.send(f"🌤️ Đang lấy thông tin thời tiết...")
+        
+        # Phân tích câu hỏi
+        location, day_offset = parse_weather_query(query)
+        
+        # Xử lý theo ngày
+        if day_offset == 0:
+            # Thời tiết hiện tại
+            weather_info = await get_current_weather(location)
+        else:
+            # Dự báo cho ngày mai, ngày kia
+            weather_info = await get_weather_forecast(location, day_offset)
+        
         if weather_info:
             await message.channel.send(weather_info)
         else:
-            await message.channel.send(f"❌ Không thể lấy thông tin thời tiết cho {location}. Thử lại với tên thành phố khác nhé!")
+            await message.channel.send(f"❌ Không thể lấy thông tin thời tiết cho '{location}'. Vui lòng thử với tên thành phố khác!")
         return
 
     # Các lệnh cũ
@@ -743,29 +1051,23 @@ async def on_message(message):
             await message.channel.send("❌ Cú pháp: `!member_info username`")
         return
 
-    # Xử lý câu hỏi về thời tiết khi được tag
+    # Xử lý câu hỏi về thời tiết khi được tag (ĐÃ NÂNG CẤP)
     if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         user_message = message.content.replace(f'<@{client.user.id}>', '').strip().lower()
         
         # Kiểm tra câu hỏi về thời tiết
-        weather_keywords = ['thời tiết', 'weather', 'nhiệt độ', 'trời hôm nay', 'dự báo', 'mưa', 'nắng']
+        weather_keywords = ['thời tiết', 'weather', 'nhiệt độ', 'trời', 'dự báo', 'mưa', 'nắng', 'bao nhiêu độ', 'độ ẩm']
         if any(keyword in user_message for keyword in weather_keywords):
-            # Trích xuất địa điểm từ câu hỏi
-            location = "Hanoi"  # Mặc định
-            locations = ['hà nội', 'hanoi', 'hồ chí minh', 'ho chi minh', 'đà nẵng', 'da nang', 'hải phòng', 'hai phong']
-            for loc in locations:
-                if loc in user_message:
-                    if loc == 'hà nội' or loc == 'hanoi':
-                        location = "Hanoi"
-                    elif loc == 'hồ chí minh' or loc == 'ho chi minh':
-                        location = "Ho Chi Minh City"
-                    elif loc == 'đà nẵng' or loc == 'da nang':
-                        location = "Da Nang"
-                    elif loc == 'hải phòng' or loc == 'hai phong':
-                        location = "Hai Phong"
-                    break
+            # Phân tích câu hỏi để xác định địa điểm và ngày
+            location, day_offset = parse_weather_query(user_message)
             
-            weather_info = await get_weather(location)
+            if day_offset == 0:
+                # Thời tiết hiện tại
+                weather_info = await get_current_weather(location)
+            else:
+                # Dự báo
+                weather_info = await get_weather_forecast(location, day_offset)
+            
             if weather_info:
                 await message.channel.send(weather_info)
             else:
