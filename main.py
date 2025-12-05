@@ -13,10 +13,14 @@ import datetime
 import time
 import aiohttp
 import urllib.parse
+import random
+import json
+from typing import Optional
 
 # Lấy token từ environment variables
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+WEATHER_API_KEY = os.getenv('WEATHER_API_KEY')  # Thêm cho thời tiết
 
 # Kiểm tra environment variables
 if not DISCORD_TOKEN:
@@ -32,13 +36,13 @@ print("🔄 Đang khởi động Yoo Ji Min...")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# Lưu trữ lịch sử hội thoại theo channel_id - 200 tin nhắn
+# Lưu trữ lịch sử hội thoại theo channel_id
 conversation_history = defaultdict(lambda: deque(maxlen=200))
 
-# Lưu trữ tất cả tin nhắn trong server để học hỏi (chỉ đọc)
-server_memory = deque(maxlen=500)
+# Lưu trữ tất cả tin nhắn trong server để học hỏi (chỉ đọc) - TĂNG LÊN 1000
+server_memory = deque(maxlen=1000)
 
-# Thông tin thành viên server - ĐÃ CẬP NHẬT
+# Thông tin thành viên server
 server_members = {
     "demacianking1": {
         "name": "Cường",
@@ -64,7 +68,7 @@ server_members = {
         "birthday": {"day": 17, "month": 11},
         "year": 2000,
         "job": "kiến trúc sư",
-        "relationship": "Người yêu: Lục Ngọc Hà",  # THÔNG TIN MỚI
+        "relationship": "Người yêu: Lục Ngọc Hà",
         "last_birthday_wish": None
     },
     "manted1229": {
@@ -95,6 +99,32 @@ server_members = {
         "last_birthday_wish": None
     }
 }
+
+# Dữ liệu bài Tarot
+TAROT_CARDS = [
+    {"name": "The Fool", "meaning": "Khởi đầu mới, ngây thơ, tự phát"},
+    {"name": "The Magician", "meaning": "Sức mạnh, kỹ năng, hành động"},
+    {"name": "The High Priestess", "meaning": "Trực giác, bí ẩn, tiềm thức"},
+    {"name": "The Empress", "meaning": "Sinh sôi, nuôi dưỡng, tự nhiên"},
+    {"name": "The Emperor", "meaning": "Quyền lực, ổn định, lãnh đạo"},
+    {"name": "The Hierophant", "meaning": "Truyền thống, tâm linh, giáo dục"},
+    {"name": "The Lovers", "meaning": "Tình yêu, lựa chọn, hài hòa"},
+    {"name": "The Chariot", "meaning": "Ý chí, chiến thắng, kiểm soát"},
+    {"name": "Strength", "meaning": "Sức mạnh nội tâm, lòng can đảm, kiên nhẫn"},
+    {"name": "The Hermit", "meaning": "Suy tư, cô độc, tìm kiếm nội tâm"},
+    {"name": "Wheel of Fortune", "meaning": "Vận may, số phận, thay đổi"},
+    {"name": "Justice", "meaning": "Công lý, cân bằng, trách nhiệm"},
+    {"name": "The Hanged Man", "meaning": "Hy sinh, buông bỏ, góc nhìn mới"},
+    {"name": "Death", "meaning": "Kết thúc, chuyển đổi, tái sinh"},
+    {"name": "Temperance", "meaning": "Điều độ, hài hòa, kiên nhẫn"},
+    {"name": "The Devil", "meaning": "Cám dỗ, phụ thuộc, vật chất"},
+    {"name": "The Tower", "meaning": "Thay đổi đột ngột, thức tỉnh, giải phóng"},
+    {"name": "The Star", "meaning": "Hy vọng, cảm hứng, tinh thần lạc quan"},
+    {"name": "The Moon", "meaning": "Trực giác, ảo tưởng, tiềm thức"},
+    {"name": "The Sun", "meaning": "Hạnh phúc, thành công, tích cực"},
+    {"name": "Judgement", "meaning": "Đánh giá, hồi sinh, thức tỉnh"},
+    {"name": "The World", "meaning": "Hoàn thành, thành tựu, hành trình"}
+]
 
 # Tính cách Yoo Ji Min
 personality = """
@@ -128,11 +158,150 @@ EMOJI THEO CHỦ ĐỀ:
 LUÔN DÙNG EMOJI PHÙ HỢP VÀ EMOJI KHÔNG TÍNH VÀO GIỚI HẠN CHỮ!
 """
 
-# Hàm tạo ảnh sinh nhật bằng Pollinations AI - CHỈ DÙNG CHO SINH NHẬT
+# ==============================================
+# CÁC HÀM TIỆN ÍCH MỚI
+# ==============================================
+
+# Hàm lấy thời tiết từ OpenWeatherMap
+async def get_weather(location: str = "Hanoi") -> Optional[str]:
+    """Lấy thông tin thời tiết từ OpenWeatherMap API"""
+    try:
+        if not WEATHER_API_KEY:
+            return None
+        
+        # Mã hóa địa điểm
+        encoded_location = urllib.parse.quote(location)
+        
+        # URL API với đơn vị metric (Celsius)
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={encoded_location}&appid={WEATHER_API_KEY}&units=metric&lang=vi"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    # Trích xuất thông tin
+                    temp = data['main']['temp']
+                    feels_like = data['main']['feels_like']
+                    humidity = data['main']['humidity']
+                    weather_desc = data['weather'][0]['description']
+                    wind_speed = data['wind']['speed']
+                    city = data['name']
+                    
+                    # Emoji theo mô tả thời tiết
+                    weather_emoji = {
+                        'mây': '☁️', 'nắng': '☀️', 'mưa': '🌧️', 'dông': '⛈️',
+                        'sương mù': '🌫️', 'tuyết': '❄️', 'gió': '💨'
+                    }
+                    
+                    emoji = '🌈'
+                    for key, value in weather_emoji.items():
+                        if key in weather_desc.lower():
+                            emoji = value
+                            break
+                    
+                    return (f"**Dự báo thời tiết {city}:** {emoji}\n"
+                           f"🌡️ **Nhiệt độ:** {temp}°C (cảm giác như {feels_like}°C)\n"
+                           f"💧 **Độ ẩm:** {humidity}%\n"
+                           f"🌬️ **Gió:** {wind_speed} m/s\n"
+                           f"📝 **Mô tả:** {weather_desc.capitalize()}")
+                    
+                else:
+                    return None
+    except Exception as e:
+        print(f"❌ Lỗi lấy thời tiết: {e}")
+        return None
+
+# Hàm bói bài Tarot
+async def tarot_reading() -> str:
+    """Trải bài Tarot ngẫu nhiên"""
+    try:
+        card = random.choice(TAROT_CARDS)
+        
+        # Xác định ý nghĩa chi tiết
+        reading_prompt = f"""
+Lá bài: {card['name']}
+Ý nghĩa cơ bản: {card['meaning']}
+
+Hãy giải thích chi tiết lá bài này trong bối cảnh hiện tại:
+1. Luận giải chi tiết ý nghĩa
+2. Áp dụng vào cuộc sống hàng ngày
+3. Lời khuyên từ lá bài
+4. Dùng emoji phù hợp 🃏✨
+5. Giọng văn huyền bí, thú vị
+6. Độ dài: khoảng 100-150 chữ
+
+Giải bài:
+"""
+        response = model.generate_content(reading_prompt)
+        return f"**🎴 Lá bài Tarot của bạn: {card['name']}**\n{response.text.strip()}"
+    except Exception as e:
+        return f"❌ Lỗi khi bói bài Tarot: {str(e)}"
+
+# Hàm tính thần số học
+async def numerology_reading(name: str, birth_date: str = None) -> str:
+    """Tính toán thần số học"""
+    try:
+        # Nếu không có ngày sinh, chỉ tính theo tên
+        prompt = f"""
+Tên: {name}
+{"Ngày sinh: " + birth_date if birth_date else "Không có ngày sinh"}
+
+Hãy phân tích thần số học cho người này:
+1. Tính toán các con số chủ đạo (nếu có ngày sinh)
+2. Phân tích ý nghĩa tên
+3. Đặc điểm tính cách
+4. Điểm mạnh và điểm yếu
+5. Lời khuyên phát triển
+6. Dùng emoji phù hợp 🔢✨
+7. Giọng văn chuyên nghiệp, chi tiết
+8. Độ dài: khoảng 150-200 chữ
+
+Phân tích thần số học:
+"""
+        response = model.generate_content(prompt)
+        return f"**🔮 Phân tích thần số học cho {name}**\n{response.text.strip()}"
+    except Exception as e:
+        return f"❌ Lỗi khi tính thần số học: {str(e)}"
+
+# Hàm tóm tắt drama từ chat history
+async def summarize_drama() -> str:
+    """Đọc 1000 tin nhắn gần nhất và tóm tắt drama"""
+    try:
+        if not server_memory:
+            return "🤷‍♀️ Chưa có drama nào để hóng cả, chat nhiều lên đi nào! 💬"
+        
+        # Lấy 1000 tin nhắn gần nhất
+        recent_messages = list(server_memory)[-1000:]
+        
+        # Chuẩn bị prompt
+        messages_text = "\n".join(recent_messages[-100:])  # Chỉ lấy 100 tin nhắn gần nhất để tránh prompt quá dài
+        
+        drama_prompt = f"""
+Dưới đây là lịch sử chat gần đây trong server:
+{messages_text}
+
+Hãy đóng vai một người thích HÓNG HỚT, tóm tắt lại những drama, câu chuyện thú vị trong server:
+1. Giọng văn VUI VẺ, HÀI HƯỚC, THÍCH HÓNG HỚT
+2. Nhận xét về các tình huống hài hước, thú vị
+3. Đừng quên thêm emoji dí dỏm
+4. Có thể "buôn chuyện" một chút nhưng đừng ác ý
+5. Độ dài: khoảng 150-200 chữ
+6. Dùng từ ngữ trẻ trung, hiện đại
+7. Có thể nhắc đến tên thành viên nếu có trong chat
+
+Tóm tắt drama của mình đây:
+"""
+        response = model.generate_content(drama_prompt)
+        return f"**🎭 BẢN TIN HÓNG HỚT CẬP NHẬT** 🍿\n{response.text.strip()}"
+    except Exception as e:
+        print(f"❌ Lỗi khi tóm tắt drama: {e}")
+        return "❌ Mình bị lỗi khi hóng hớt rồi, thử lại sau nhé! 😅"
+
+# Hàm tạo ảnh sinh nhật bằng Pollinations AI
 async def generate_birthday_image(name, age, job):
     """Tạo ảnh chúc mừng sinh nhật bằng Pollinations AI"""
     try:
-        # Tạo prompt cho ảnh sinh nhật dựa trên thông tin
         prompt = f"""
         Beautiful digital art celebrating birthday for {name} who is {age} years old and works as {job}.
         Birthday cake with candles, colorful balloons, festive decorations, happy birthday theme,
@@ -140,18 +309,13 @@ async def generate_birthday_image(name, age, job):
         Style: digital painting, vibrant, celebratory.
         """
         
-        # Mã hóa prompt
         encoded_prompt = urllib.parse.quote(prompt)
-        
-        # URL Pollinations AI với Flux model, độ phân giải 1024x1024
         url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
         
-        # Tải ảnh
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status == 200:
-                    image_data = await response.read()
-                    return image_data
+                    return await response.read()
                 else:
                     print(f"❌ Lỗi tải ảnh: {response.status}")
                     return None
@@ -259,10 +423,8 @@ async def check_birthdays(client):
     
     for username, info in server_members.items():
         if info["birthday"]["day"] == today_day and info["birthday"]["month"] == today_month:
-            # Kiểm tra đã chúc mừng trong ngày hôm nay chưa
             last_wish = info.get("last_birthday_wish")
             if last_wish != today.strftime("%Y-%m-%d"):
-                # Tìm user trong server
                 user = None
                 for guild in client.guilds:
                     user = guild.get_member_named(username)
@@ -270,7 +432,6 @@ async def check_birthdays(client):
                         break
                 
                 if user:
-                    # Tạo lời chúc mừng sinh nhật
                     age = today.year - info["year"]
                     birthday_prompt = f"""
 Hôm nay là sinh nhật của {info['name']} ({username}) - {age} tuổi, nghề nghiệp: {info['job']}.
@@ -288,37 +449,28 @@ Lời chúc của em:
                     response = model.generate_content(birthday_prompt)
                     birthday_message = response.text.strip()
                     
-                    # TẠO ẢNH SINH NHẬT
                     image_data = await generate_birthday_image(info['name'], age, info['job'])
                     
-                    # Gửi lời chúc đến kênh chung
                     for guild in client.guilds:
                         for channel in guild.text_channels:
                             if channel.permissions_for(guild.me).send_messages:
                                 if image_data:
-                                    # Tạo file ảnh từ dữ liệu
                                     image_file = discord.File(io.BytesIO(image_data), filename=f"birthday_{info['name']}.png")
                                     await channel.send(
                                         f"🎉 **Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}",
                                         file=image_file
                                     )
-                                    print(f"🎂 Đã gửi lời chúc và ảnh sinh nhật tới {info['name']}")
                                 else:
                                     await channel.send(f"🎉 **Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}")
-                                    print(f"🎂 Đã gửi lời chúc sinh nhật tới {info['name']} (không có ảnh)")
                                 break
                         break
                     
-                    # Đánh dấu đã chúc mừng trong ngày
                     info["last_birthday_wish"] = today.strftime("%Y-%m-%d")
 
 # Hàm test sinh nhật
 async def test_birthday(client, username, channel):
-    """Hàm test chúc mừng sinh nhật (dùng cho testing)"""
     if username in server_members:
         info = server_members[username]
-        
-        # Tạo lời chúc mừng sinh nhật
         age = datetime.datetime.now().year - info["year"]
         birthday_prompt = f"""
 Hôm nay là sinh nhật TEST của {info['name']} ({username}) - {age} tuổi, nghề nghiệp: {info['job']}.
@@ -336,10 +488,8 @@ Lời chúc của em:
         response = model.generate_content(birthday_prompt)
         birthday_message = response.text.strip()
         
-        # TẠO ẢNH SINH NHẬT
         image_data = await generate_birthday_image(info['name'], age, info['job'])
         
-        # Tìm user trong server
         user = None
         for guild in client.guilds:
             user = guild.get_member_named(username)
@@ -348,18 +498,14 @@ Lời chúc của em:
         
         if user:
             if image_data:
-                # Gửi kèm ảnh
                 image_file = discord.File(io.BytesIO(image_data), filename=f"test_birthday_{info['name']}.png")
                 await channel.send(
                     f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}",
                     file=image_file
                 )
-                print(f"✅ Đã test chúc mừng sinh nhật cho {info['name']} (có ảnh)")
             else:
                 await channel.send(f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n{user.mention}\n{birthday_message}")
-                print(f"✅ Đã test chúc mừng sinh nhật cho {info['name']} (không có ảnh)")
         else:
-            # Nếu không tìm thấy user, vẫn gửi thông báo
             if image_data:
                 image_file = discord.File(io.BytesIO(image_data), filename=f"test_birthday_{info['name']}.png")
                 await channel.send(
@@ -368,13 +514,11 @@ Lời chúc của em:
                 )
             else:
                 await channel.send(f"🎉 **TEST - Chúc mừng sinh nhật!** 🎉\n**{info['name']}** ({username})\n{birthday_message}")
-            print(f"⚠️ Không tìm thấy user {username}, nhưng đã gửi test sinh nhật cho {info['name']}")
     else:
         await channel.send(f"❌ Không tìm thấy thông tin cho username: {username}")
 
 # Hàm hiển thị thông tin thành viên
 async def show_member_info(username, channel):
-    """Hiển thị thông tin thành viên"""
     if username in server_members:
         info = server_members[username]
         today = datetime.datetime.now()
@@ -407,7 +551,7 @@ async def show_member_info(username, channel):
     else:
         await channel.send(f"❌ Không tìm thấy thông tin cho username: {username}")
 
-# Hàm phân tích ảnh - ĐÃ SỬA BỎ "ANH ĐỨC ƠI"
+# Hàm phân tích ảnh
 async def analyze_image(image_url, message_type, message_author, user_message="", history_text="", server_context=""):
     try:
         response = requests.get(image_url)
@@ -415,8 +559,6 @@ async def analyze_image(image_url, message_type, message_author, user_message=""
         image = Image.open(io.BytesIO(image_data))
         
         question_type = check_question_type(user_message) if user_message else "normal"
-        
-        # Lấy thông tin người gửi
         member_info = get_member_info(message_author)
         
         if message_type == "duc":
@@ -455,7 +597,6 @@ TRẢ LỜI:
 Em trả lời:
 """
         else:
-            # Kiểm tra nếu là thành viên đã biết
             if member_info:
                 prompt_text = f"""
 {personality}
@@ -498,7 +639,10 @@ Trả lời:
     except Exception as e:
         return f"Lỗi phân tích ảnh 😅"
 
-# Tạo Discord client
+# ==============================================
+# DISCORD CLIENT
+# ==============================================
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
@@ -508,11 +652,8 @@ client = discord.Client(intents=intents)
 async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
     await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫"))
-    
-    # Bắt đầu task kiểm tra sinh nhật mỗi ngày
     client.loop.create_task(birthday_check_loop())
 
-# Vòng lặp kiểm tra sinh nhật mỗi ngày
 async def birthday_check_loop():
     await client.wait_until_ready()
     while not client.is_closed():
@@ -520,12 +661,11 @@ async def birthday_check_loop():
             await check_birthdays(client)
         except Exception as e:
             print(f"❌ Lỗi khi kiểm tra sinh nhật: {e}")
-        # Chờ 24 giờ
         await asyncio.sleep(24 * 60 * 60)
 
 @client.event
 async def on_message(message):
-    # Lưu tất cả tin nhắn vào server memory (chỉ đọc)
+    # Lưu tin nhắn vào memory
     if message.content and not message.author.bot:
         timestamp = datetime.datetime.now().strftime("%H:%M")
         memory_msg = f"[{timestamp}] {message.author.display_name}: {message.content}"
@@ -538,7 +678,53 @@ async def on_message(message):
     if any(mention in [message.guild.default_role, "everyone", "here"] for mention in message.mentions):
         return
 
-    # XỬ LÝ LỆNH TRỰC TIẾP
+    # ==============================================
+    # XỬ LÝ CÁC LỆNH MỚI
+    # ==============================================
+    
+    # Lệnh Tarot
+    if message.content.startswith('!tarot'):
+        await message.channel.send("🔮 Đang rút lá bài Tarot cho bạn...")
+        tarot_result = await tarot_reading()
+        await message.channel.send(tarot_result)
+        return
+
+    # Lệnh Thần số học
+    if message.content.startswith('!thansohoc') or message.content.startswith('!numerology'):
+        parts = message.content.split()
+        if len(parts) >= 2:
+            name = parts[1]
+            birth_date = parts[2] if len(parts) >= 3 else None
+            await message.channel.send(f"🔢 Đang tính thần số học cho {name}...")
+            numerology_result = await numerology_reading(name, birth_date)
+            await message.channel.send(numerology_result)
+        else:
+            await message.channel.send("❌ Cú pháp: `!thansohoc [tên] (ngày sinh)`\nVí dụ: `!thansohoc Nguyễn Văn A 15/05/1995`")
+        return
+
+    # Lệnh Drama
+    if message.content.startswith('!drama'):
+        await message.channel.send("🍿 Đang hóng hớt drama cho bạn...")
+        drama_summary = await summarize_drama()
+        await message.channel.send(drama_summary)
+        return
+
+    # Lệnh thời tiết
+    if message.content.startswith('!weather') or message.content.startswith('!thoitiet'):
+        parts = message.content.split()
+        location = "Hanoi"  # Mặc định Hà Nội
+        if len(parts) >= 2:
+            location = " ".join(parts[1:])
+        
+        await message.channel.send(f"🌤️ Đang lấy dự báo thời tiết cho {location}...")
+        weather_info = await get_weather(location)
+        if weather_info:
+            await message.channel.send(weather_info)
+        else:
+            await message.channel.send(f"❌ Không thể lấy thông tin thời tiết cho {location}. Thử lại với tên thành phố khác nhé!")
+        return
+
+    # Các lệnh cũ
     if message.content.startswith('!test_birthday'):
         parts = message.content.split()
         if len(parts) == 2:
@@ -557,11 +743,39 @@ async def on_message(message):
             await message.channel.send("❌ Cú pháp: `!member_info username`")
         return
 
-    # XỬ LÝ CÂU HỎI VỀ THÔNG TIN THÀNH VIÊN KHI ĐƯỢC TAG
+    # Xử lý câu hỏi về thời tiết khi được tag
     if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         user_message = message.content.replace(f'<@{client.user.id}>', '').strip().lower()
         
-        # Kiểm tra các từ khóa về thông tin thành viên
+        # Kiểm tra câu hỏi về thời tiết
+        weather_keywords = ['thời tiết', 'weather', 'nhiệt độ', 'trời hôm nay', 'dự báo', 'mưa', 'nắng']
+        if any(keyword in user_message for keyword in weather_keywords):
+            # Trích xuất địa điểm từ câu hỏi
+            location = "Hanoi"  # Mặc định
+            locations = ['hà nội', 'hanoi', 'hồ chí minh', 'ho chi minh', 'đà nẵng', 'da nang', 'hải phòng', 'hai phong']
+            for loc in locations:
+                if loc in user_message:
+                    if loc == 'hà nội' or loc == 'hanoi':
+                        location = "Hanoi"
+                    elif loc == 'hồ chí minh' or loc == 'ho chi minh':
+                        location = "Ho Chi Minh City"
+                    elif loc == 'đà nẵng' or loc == 'da nang':
+                        location = "Da Nang"
+                    elif loc == 'hải phòng' or loc == 'hai phong':
+                        location = "Hai Phong"
+                    break
+            
+            weather_info = await get_weather(location)
+            if weather_info:
+                await message.channel.send(weather_info)
+            else:
+                await message.channel.send("❌ Hiện tại mình không thể lấy thông tin thời tiết. Bạn thử lại sau nhé! 😅")
+            return
+
+    # Xử lý thông tin thành viên khi được tag
+    if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
+        user_message = message.content.replace(f'<@{client.user.id}>', '').strip().lower()
+        
         member_keywords = ['sinh nhật', 'ngày sinh', 'birthday', 'tuổi', 'thông tin', 'info', 'nghề nghiệp', 'công việc']
         member_names = {
             'cường': 'demacianking1',
@@ -575,14 +789,12 @@ async def on_message(message):
             'tuấn': 'pta.zyud'
         }
         
-        # Tìm tên thành viên được nhắc đến
         found_member = None
         for name, username in member_names.items():
             if name in user_message:
                 found_member = username
                 break
         
-        # Nếu tìm thấy thành viên và có từ khóa về thông tin
         if found_member and any(keyword in user_message for keyword in member_keywords):
             if found_member in server_members:
                 info = server_members[found_member]
@@ -615,21 +827,23 @@ async def on_message(message):
                 await message.channel.send(response)
                 return
 
-    # Chỉ trả lời khi được tag hoặc DM (cho các tin nhắn thông thường)
+    # Xử lý tin nhắn thông thường khi được tag
     if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         try:
             async with message.channel.typing():
                 channel_id = str(message.channel.id)
                 user_message = message.content.replace(f'<@{client.user.id}>', '').strip()
                 
-                # Xác định loại câu hỏi để điều chỉnh độ dài
+                # Lấy thông tin thời gian hiện tại
+                current_time = datetime.datetime.now()
+                time_context = f"Thời gian hiện tại: {current_time.strftime('%H:%M %d/%m/%Y')}\n"
+                
+                # Xác định loại câu hỏi
                 question_type = check_question_type(user_message)
                 
-                # Lấy lịch sử hội thoại và ngữ cảnh server
+                # Lấy thông tin hội thoại
                 history_text = get_conversation_history(channel_id)
                 server_context = get_server_context()
-                
-                # Lấy thông tin người gửi
                 member_info = get_member_info(message.author)
                 
                 # Xử lý ảnh đính kèm
@@ -640,14 +854,11 @@ async def on_message(message):
                             analysis = await analyze_image(attachment.url, message_type, message.author, user_message, history_text, server_context)
                             
                             await message.reply(analysis)
-                            
-                            # Lưu vào lịch sử kênh
-                            if user_message:
-                                add_to_history(channel_id, f"{message.author.display_name}: {user_message} (có ảnh)")
+                            add_to_history(channel_id, f"{message.author.display_name}: {user_message} (có ảnh)")
                             add_to_history(channel_id, f"Yoo Ji Min: {analysis}")
                             return
                 
-                # Xử lý tin nhắn chỉ có tag
+                # Xử lý tag không kèm tin nhắn
                 if not user_message:
                     message_type = check_message_type("", message.author)
                     if message_type == "duc":
@@ -655,7 +866,6 @@ async def on_message(message):
                     elif message_type == "brother":
                         response_text = "Dạ anh cần em giúp gì không ạ? 😊"
                     else:
-                        # Kiểm tra nếu là thành viên đã biết
                         if member_info:
                             response_text = f"Dạ {member_info['name']} cần em giúp gì ạ? 😊"
                         else:
@@ -667,9 +877,8 @@ async def on_message(message):
                     return
                 
                 message_type = check_message_type(user_message, message.author)
-                print(f"👤 {message.author.name}: {user_message} | Loại: {message_type} | Độ dài: {question_type}")
-
-                # Prompt cho từng loại tin nhắn
+                
+                # Tạo prompt với thông tin thời gian
                 if message_type == "duc":
                     length_guide = {
                         "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
@@ -680,6 +889,7 @@ async def on_message(message):
                     prompt = f"""
 {personality}
 
+{time_context}
 {server_context}
 {history_text}
 
@@ -707,6 +917,7 @@ Em trả lời:
                     prompt = f"""
 {personality}
 
+{time_context}
 {server_context}
 {history_text}
 
@@ -722,7 +933,6 @@ TRẢ LỜI:
 Em trả lời:
 """
                 else:
-                    # Kiểm tra nếu là thành viên đã biết
                     if member_info:
                         length_guide = {
                             "long": "trả lời CHI TIẾT, đầy đủ thông tin (có thể đến 80 chữ)",
@@ -733,6 +943,7 @@ Em trả lời:
                         prompt = f"""
 {personality}
 
+{time_context}
 {server_context}
 {history_text}
 
@@ -758,6 +969,7 @@ Trả lời:
                         prompt = f"""
 {personality}
 
+{time_context}
 {server_context}
 {history_text}
 
@@ -778,7 +990,7 @@ Trả lời:
                 if response.text:
                     response_text = response.text.strip()
                     
-                    # Giới hạn chữ linh hoạt theo loại câu hỏi
+                    # Giới hạn chữ linh hoạt
                     words = response_text.split()
                     if question_type == "long" and len(words) > 80:
                         response_text = ' '.join(words[:80]) + "..."
@@ -788,9 +1000,6 @@ Trả lời:
                         response_text = ' '.join(words[:35])
                     
                     await message.reply(response_text)
-                    print(f"🤖 Yoo Ji Min: {response_text}")
-                    
-                    # Lưu vào lịch sử kênh
                     add_to_history(channel_id, f"{message.author.display_name}: {user_message}")
                     add_to_history(channel_id, f"Yoo Ji Min: {response_text}")
                 else:
@@ -804,7 +1013,7 @@ Trả lời:
             error_msg = "Có lỗi xảy ra, bạn thử lại nhé! 😅"
             await message.reply(error_msg)
 
-# Tạo web server đơn giản
+# Web server
 app = flask.Flask(__name__)
 
 @app.route('/')
@@ -823,7 +1032,6 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# Chạy bot
 if __name__ == "__main__":
     keep_alive()
     try:
