@@ -726,9 +726,9 @@ Lời chúc của em:
     except Exception as e:
         print(f"❌ Lỗi khi gửi chúc mừng sinh nhật: {e}")
 
-# Hàm kiểm tra và gửi thông báo sinh nhật (HOÀN TOÀN MỚI)
+# Hàm kiểm tra và gửi thông báo sinh nhật (ĐÃ SỬA - KIỂM TRA MỖI GIỜ)
 async def check_birthdays_and_countdown(client):
-    """Kiểm tra sinh nhật và gửi thông báo đếm ngược"""
+    """Kiểm tra sinh nhật và gửi thông báo đếm ngược - CHẠY MỖI GIỜ"""
     try:
         # Lấy thời gian hiện tại ở Việt Nam
         vn_time = get_vietnam_time()
@@ -760,30 +760,31 @@ async def check_birthdays_and_countdown(client):
             
             print(f"   👤 {info['name']}: Sinh nhật {birth_day}/{birth_month}, Còn {days_until_birthday} ngày")
             
-            # CHỈ KIỂM TRA VÀO LÚC 9:00 SÁNG (giờ Việt Nam)
-            if current_hour == 9 and current_minute <= 5:  # 9:00-9:05 AM
+            # KIỂM TRA MỖI GIỜ (không chỉ 9:00 nữa)
+            # Điều này đảm bảo bot sẽ phát hiện khi đến ngày đếm ngược
+            
+            # 1. KIỂM TRA SINH NHẬT HÔM NAY (ngày 0)
+            if days_until_birthday == 0:
+                last_wish = info.get("last_birthday_wish")
+                if last_wish != today.strftime("%Y-%m-%d"):
+                    await send_birthday_wish(client, username, info, age_at_birthday, today)
+                    info["last_birthday_wish"] = today.strftime("%Y-%m-%d")
+                    info["countdown_sent"] = []  # Reset danh sách đếm ngược
+            
+            # 2. KIỂM TRA ĐẾM NGƯỢC (5, 4, 3, 2, 1 ngày trước)
+            elif 1 <= days_until_birthday <= 5:
+                # Kiểm tra xem đã gửi thông báo cho ngày này chưa
+                countdown_key = f"{today.strftime('%Y-%m-%d')}_{days_until_birthday}"
                 
-                # 1. KIỂM TRA SINH NHẬT HÔM NAY (ngày 0)
-                if days_until_birthday == 0:
-                    last_wish = info.get("last_birthday_wish")
-                    if last_wish != today.strftime("%Y-%m-%d"):
-                        await send_birthday_wish(client, username, info, age_at_birthday, today)
-                        info["last_birthday_wish"] = today.strftime("%Y-%m-%d")
-                        info["countdown_sent"] = []  # Reset danh sách đếm ngược
-                
-                # 2. KIỂM TRA ĐẾM NGƯỢC (5, 4, 3, 2, 1 ngày trước)
-                elif 1 <= days_until_birthday <= 5:
-                    # Kiểm tra xem đã gửi thông báo cho ngày này chưa
-                    countdown_key = f"{today.strftime('%Y-%m-%d')}_{days_until_birthday}"
-                    
-                    if countdown_key not in info.get("countdown_sent", []):
-                        await send_countdown_message(client, username, info, days_until_birthday, next_birthday)
-                        info["countdown_sent"] = info.get("countdown_sent", []) + [countdown_key]
-                
-                # 3. KIỂM TRA NẾP QUÁ 5 NGÀY, RESET DANH SÁCH
-                elif days_until_birthday > 5:
-                    if info.get("countdown_sent"):
-                        info["countdown_sent"] = []
+                if countdown_key not in info.get("countdown_sent", []):
+                    # Gửi thông báo đếm ngược vào bất kỳ giờ nào trong ngày
+                    await send_countdown_message(client, username, info, days_until_birthday, next_birthday)
+                    info["countdown_sent"] = info.get("countdown_sent", []) + [countdown_key]
+            
+            # 3. KIỂM TRA NẾP QUÁ 5 NGÀY, RESET DANH SÁCH
+            elif days_until_birthday > 5:
+                if info.get("countdown_sent"):
+                    info["countdown_sent"] = []
             
             # Debug: In thông tin chi tiết
             if days_until_birthday <= 10:
@@ -792,7 +793,7 @@ async def check_birthdays_and_countdown(client):
                 if days_until_birthday == 0:
                     print(f"     🎉 HÔM NAY LÀ SINH NHẬT!")
                 elif days_until_birthday <= 5:
-                    print(f"     ⏰ Sẽ gửi đếm ngược vào 9:00 sáng")
+                    print(f"     ⏰ Sẽ gửi đếm ngược ngay lập tức")
         
         print(f"✅ [Sinh nhật] Kiểm tra hoàn thành\n")
         
@@ -885,7 +886,7 @@ async def show_member_info(username, channel):
         if days_until_birthday == 0:
             response += "\n🎉 **HÔM NAY LÀ SINH NHẬT!** 🎉"
         elif days_until_birthday <= 5:
-            response += f"\n🎁 **Đang đếm ngược:** Bot sẽ thông báo vào 9:00 sáng! ⏰"
+            response += f"\n🎁 **Đang đếm ngược:** Bot sẽ thông báo ngay khi phát hiện! ⏰"
         
         await channel.send(response)
     else:
@@ -893,7 +894,7 @@ async def show_member_info(username, channel):
 
 # Hàm xác định loại tin nhắn và người gửi
 def check_message_type(message_content, message_author):
-    content_lower = message_content.lower()
+    content_lower = message.content.lower()
     
     # KIỂM TRA ĐỨC ĐẦU TIÊN
     if (message_author.name.lower() == "vyanhduc" or 
@@ -1084,20 +1085,23 @@ async def on_ready():
     print(f'✅ {client.user} đã kết nối Discord thành công!')
     print(f'🕒 Thời gian server hiện tại: {get_vietnam_time().strftime("%d/%m/%Y %H:%M:%S")} (VN Time)')
     await client.change_presence(activity=discord.Game(name="Yoo Ji Min 💫"))
+    
+    # Kiểm tra sinh nhật ngay khi bot khởi động
+    await check_birthdays_and_countdown(client)
+    
+    # Bắt đầu vòng lặp kiểm tra mỗi giờ
     client.loop.create_task(birthday_check_loop())
 
 async def birthday_check_loop():
     """Vòng lặp kiểm tra sinh nhật mỗi giờ"""
     await client.wait_until_ready()
     
-    # Chạy kiểm tra ngay khi bot khởi động
-    await check_birthdays_and_countdown(client)
-    
     while not client.is_closed():
         try:
             await check_birthdays_and_countdown(client)
         except Exception as e:
             print(f"❌ Lỗi vòng lặp sinh nhật: {e}")
+        
         # Chạy mỗi giờ (3600 giây)
         await asyncio.sleep(3600)
 
@@ -1166,6 +1170,13 @@ async def on_message(message):
                 await message.channel.send(f"❌ Không tìm thấy username: {username}")
         else:
             await message.channel.send("❌ Cú pháp: `!test_countdown username`")
+        return
+
+    # Lệnh kiểm tra sinh nhật ngay lập tức
+    if message.content.startswith('!check_birthday_now'):
+        await message.channel.send("🎂 Đang kiểm tra sinh nhật ngay lập tức...")
+        await check_birthdays_and_countdown(client)
+        await message.channel.send("✅ Đã kiểm tra xong!")
         return
 
     # Lệnh Drama (TÓM TẮT TOÀN BỘ 500 TIN NHẮN)
@@ -1299,7 +1310,7 @@ async def on_message(message):
                 if days_until_birthday == 0:
                     response += "\n🎉 **HÔM NAY LÀ SINH NHẬT!** 🎉"
                 elif days_until_birthday <= 5:
-                    response += f"\n🎁 **Đang đếm ngược:** Bot sẽ thông báo vào 9:00 sáng! ⏰"
+                    response += f"\n🎁 **Đang đếm ngược:** Bot sẽ thông báo ngay khi phát hiện! ⏰"
                 
                 await message.channel.send(response)
                 return
